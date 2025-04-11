@@ -64,6 +64,10 @@ Performance comparison of the three extraction methods on the synthetic dataset 
 
 ![Extractor Comparison](experiment_outputs/extractor_comparison.png)
 
+Example patient timeline:
+
+![Example Patient Timeline](notebooks/patient_diagnosis_timeline.png)
+
 ## Further Usage
 
 ### Training the Custom Neural Network Model (Optional)
