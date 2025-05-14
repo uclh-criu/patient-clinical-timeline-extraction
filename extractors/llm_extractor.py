@@ -82,31 +82,32 @@ class LLMExtractor(BaseRelationExtractor):
         else:
             diagnoses, dates = entities
         
-        diagnoses_list = [d[0] for d in diagnoses]
-        dates_list = [d[0] for d in dates]
+        # Extract diagnosis names and positions
+        diagnoses_info = [{"diagnosis": d[0], "position": d[1]} for d in diagnoses]
+        # Extract parsed date, raw date string, and position
+        dates_info = [{"parsed_date": d[0], "raw_date": d[1], "position": d[2]} for d in dates]
         
         # Construct the prompt
         prompt = f"""
 
         You are tasked with doing relationship extraction between diagnoses and dates from unstructured medical text.
 
-        The diagnoses and date entities have already been extracted from the text and are provided to you.
+        The full clinical note text is provided below. Additionally, lists of diagnoses and dates, along with their character positions in the text, are provided.
 
-        For each diagnosis, identify the most relevant date based on the context.
+        For each diagnosis listed in 'Diagnoses Info', identify the single most relevant date from the 'Dates Info' list based on the context in the 'Clinical Note'. 
 
-        Return ONLY a JSON array where each object has the following structure:
+        Return ONLY a JSON array where each object represents a likely relationship and has the following structure:
         {{
-            "diagnosis": "name of diagnosis",
-            "date": "associated date",
+            "diagnosis": "name of diagnosis from the Diagnoses Info list",
+            "date": "the RAW date string (from raw_date field) associated with the diagnosis",
             "confidence": a number between 0 and 1 indicating your confidence in this association
         }}
-
-        The full clinical note and the lists of extracted diagnoses and dates are provided below.
+        Do not include diagnoses that have no associated date in the output.
 
         Clinical Note: {text}
 
-        Extracted Diagnoses: {diagnoses_list}
-        Extracted Dates: {dates_list}
+        Diagnoses Info: {diagnoses_info}
+        Dates Info: {dates_info}
 
         Provide ONLY the JSON array, no other explanation.
         """

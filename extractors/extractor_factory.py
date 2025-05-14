@@ -2,13 +2,14 @@ from extractors.naive_extractor import NaiveExtractor
 from extractors.custom_extractor import CustomExtractor
 from extractors.relcat_extractor import RelcatExtractor
 from extractors.llm_extractor import LLMExtractor
+from extractors.llama_extractor import LlamaExtractor
 
 def create_extractor(method, config):
     """
     Factory function to create the appropriate relation extractor.
     
     Args:
-        method (str): The extraction method to use ('custom', 'naive', 'relcat', or 'llm').
+        method (str): The extraction method to use ('custom', 'naive', 'relcat', 'llm', or 'llama').
         config: The configuration object or dict.
         
     Returns:
@@ -27,6 +28,8 @@ def create_extractor(method, config):
         return RelcatExtractor(config)
     elif method == 'llm':
         return LLMExtractor(config)
+    elif method == 'llama':
+        return LlamaExtractor(config)
     else:
         raise ValueError(f"Unknown extraction method: {method}. " +
-                        "Valid options are: 'custom', 'naive', 'relcat', or 'llm'.") 
+                        "Valid options are: 'custom', 'naive', 'relcat', 'llm', or 'llama'.") 

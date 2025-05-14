@@ -1,3 +1,8 @@
 __pycache__/
 .env
 venv/
+Llama-3.2-3B-Instruct/
+llama.py
+processed_notes_with_dates_and_disorders_imaging.csv
+processed_notes_with_dates_and_disorders_notes.csv
+processed_notes_with_dates_and_disorders_letters.csv
