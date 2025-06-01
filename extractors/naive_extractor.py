@@ -1,6 +1,5 @@
 import os
 from extractors.base_extractor import BaseRelationExtractor
-from utils.extraction_utils import extract_entities
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 
 class NaiveExtractor(BaseRelationExtractor):
@@ -44,11 +43,12 @@ class NaiveExtractor(BaseRelationExtractor):
                     'distance': int          # Character distance
                 }
         """
-        # Extract entities if not provided
+        # Entities are required for CSV data processing
         if entities is None:
-            diagnoses, dates = extract_entities(text)
-        else:
-            diagnoses, dates = entities
+            print("Error: entities parameter is required for CSV data processing.")
+            return []
+        
+        diagnoses, dates = entities
         
         # Find relationships
         relationships = []

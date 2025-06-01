@@ -2,22 +2,24 @@ import os
 import matplotlib.pyplot as plt
 import pandas as pd
 import json
-# Add tqdm for progress bars
+import numpy as np # Added for timeline visualization
 from tqdm import tqdm
 from datetime import datetime
+import re
 
 # Import from our modules
 from extractors.extractor_factory import create_extractor
 from utils.extraction_utils import (
-    extract_entities,
     calculate_and_report_metrics,
     load_and_prepare_data,
     run_extraction,
     get_data_path,
     transform_python_to_json,
-    extract_relative_dates_llm
+    extract_relative_dates_llm,
+    aggregate_predictions_by_patient,
+    generate_patient_timelines,
+    generate_patient_timeline_summary
 )
-from data.sample_note import CLINICAL_NOTE
 import config
 
 # Define the output directory using absolute path if project_root is available
@@ -25,217 +27,216 @@ if 'project_root' not in locals() and 'project_root' not in globals():
     project_root = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENT_OUTPUT_DIR = os.path.join(project_root, "experiment_outputs")
 
-def test_single_note():
+def generate_patient_timeline_visualizations(patient_timelines, output_dir, extractor_name):
     """
-    Test a single clinical note using the extraction method from config.
-    Outputs a list of (date, diagnosis) tuples.
+    Generates and saves timeline visualizations for each patient based on aggregated timeline data.
+
+    Args:
+        patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
+                                  Format: {patient_id: [{'diagnosis': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
+        output_dir (str): Directory to save the timeline plots.
+        extractor_name (str): Name of the extractor for file naming.
     """
-    print(f"Using device: {config.DEVICE}")
-    print(f"Using extraction method: {config.EXTRACTION_METHOD}")
-    print(f"Using data source: {config.DATA_SOURCE}")
-    
-    # Create appropriate extractor instance
-    try:
-        extractor = create_extractor(config.EXTRACTION_METHOD, config)
-        print(f"Created {extractor.name} extractor")
-    except ValueError as e:
-        print(f"Error: {e}")
-        return
-    except ImportError as e:
-        print(f"Error: Required package not installed: {e}")
-        print("Please install the necessary packages for the selected extractor.")
+    if not patient_timelines:
+        print(f"No patient timelines to visualize for {extractor_name}")
         return
     
-    # Load the extractor (models, API clients, etc.)
-    if not extractor.load():
-        print(f"Failed to load {extractor.name} extractor. Check configuration and dependencies.")
-        return
-    else:
-        print(f"Successfully loaded {extractor.name} extractor")
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
     
-    # Apply to clinical note
-    print("\nApplying extractor to clinical note...")
-    
-    # Initialize variables
-    clinical_note = None
-    entities = None
-    
-    # Get the clinical note and entities based on the data source
-    if hasattr(config, 'DATA_SOURCE') and config.DATA_SOURCE.lower() != 'synthetic':
-        # Load the first note from the real data CSV
-        try:
-            import pandas as pd
-            import json
+    for patient_id, timeline in tqdm(patient_timelines.items(), desc="Generating timeline visualizations", unit="patient"):
+        if not timeline:
+            continue
             
-            dataset_path = get_data_path(config)
-            df = pd.read_csv(dataset_path)
-            if len(df) > 0 and config.REAL_DATA_TEXT_COLUMN in df.columns:
-                # Get the note text
-                clinical_note = df.iloc[0][config.REAL_DATA_TEXT_COLUMN]
-                
-                # Check if annotation columns exist and try to load entities from them
-                diagnoses_column = getattr(config, 'REAL_DATA_DIAGNOSES_COLUMN', None)
-                dates_column = getattr(config, 'REAL_DATA_DATES_COLUMN', None)
-                
-                if (diagnoses_column and dates_column and 
-                    diagnoses_column in df.columns and dates_column in df.columns):
-                    
-                    diagnoses_data = df.iloc[0][diagnoses_column]
-                    dates_data = df.iloc[0][dates_column]
-                    
-                    if pd.notna(diagnoses_data) and pd.notna(dates_data):
-                        try:
-                            # Parse diagnoses annotations from JSON
-                            diagnoses_list = []
-                            # Transform Python-style string to valid JSON before parsing
-                            valid_diagnoses_json = transform_python_to_json(diagnoses_data)
-                            disorders = json.loads(valid_diagnoses_json)
-                            for disorder in disorders:
-                                label = disorder.get('label', '')
-                                start_pos = disorder.get('start', 0)
-                                diagnoses_list.append((label.lower(), start_pos))
-                            
-                            # Parse dates annotations from JSON
-                            dates_list = []
-                            # Transform Python-style string to valid JSON before parsing
-                            valid_dates_json = transform_python_to_json(dates_data)
-                            formatted_dates = json.loads(valid_dates_json)
-                            for date_obj in formatted_dates:
-                                parsed_date = date_obj.get('parsed', '')
-                                original_date = date_obj.get('original', '')
-                                start_pos = date_obj.get('start', 0)
-                                dates_list.append((parsed_date, original_date, start_pos))
-                            
-                            # If we found entities, use them
-                            if diagnoses_list or dates_list:
-                                entities = (diagnoses_list, dates_list)
-                                print(f"Using entities from annotation columns")
-                            else:
-                                # Use empty entities if found none in annotated columns
-                                entities = ([], [])
-                                print(f"No entities found in annotation columns, using empty entity lists")
-                        except Exception as e:
-                            # Use empty entities if there was an error
-                            entities = ([], [])
-                            print(f"Warning: Could not parse annotations, using empty entity lists: {e}")
-                    else:
-                        # Use empty entities if annotations are missing or NaN
-                        entities = ([], [])
-                        print(f"No valid annotations available, using empty entity lists")
-                else:
-                    # No annotation columns, only try extraction for synthetic data
-                    if config.DATA_SOURCE.lower() == 'synthetic':
-                        print(f"No annotation columns found, this will be extracted for synthetic data only")
-                    else:
-                        # For real data with no annotation columns, use empty entities
-                        entities = ([], [])
-                        print(f"No annotation columns found, using empty entity lists for real data")
-                
-                print(f"Using first note from real data CSV: {dataset_path}")
-            else:
-                print(f"Error: No valid notes found in {dataset_path}")
-                return
-        except Exception as e:
-            print(f"Error loading real data CSV: {e}")
-            return
-    else:
-        # Use the default sample note for synthetic data
-        from data.sample_note import CLINICAL_NOTE
-        clinical_note = CLINICAL_NOTE
-        print("Using sample clinical note")
-    
-    # If entities weren't loaded from annotation columns, extract them from text
-    # but only for synthetic data
-    if entities is None:
-        if not hasattr(config, 'DATA_SOURCE') or config.DATA_SOURCE.lower() == 'synthetic':
-            entities = extract_entities(clinical_note)
-        else:
-            # For real data with no entities yet, use empty lists
-            entities = ([], [])
-    
-    # Check if we should try to extract relative dates for real data
-    if (hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION') and 
-        config.ENABLE_RELATIVE_DATE_EXTRACTION and
-        hasattr(config, 'DATA_SOURCE') and 
-        config.DATA_SOURCE.lower() != 'synthetic' and
-        hasattr(config, 'REAL_DATA_TIMESTAMP_COLUMN')):
-        
-        timestamp_column = config.REAL_DATA_TIMESTAMP_COLUMN
-        
         try:
-            # Get the dataset path and load the first row
-            dataset_path = get_data_path(config)
-            df = pd.read_csv(dataset_path, nrows=1)
+            # Prepare data for visualization
+            parsed_dates = []
+            diagnoses = []
+            confidences = []
+            note_ids = []
             
-            if timestamp_column in df.columns:
-                timestamp_str = df.iloc[0][timestamp_column]
+            for entry in timeline:
+                date_str = entry.get('date')
+                diagnosis_str = entry.get('diagnosis')
+                confidence = entry.get('confidence', 1.0)
+                note_id = entry.get('note_id', '')
                 
-                if pd.notna(timestamp_str) and timestamp_str:
-                    # Parse the timestamp string into a datetime object
-                    # Try different formats
-                    document_timestamp = None
-                    timestamp_formats = [
-                        '%Y-%m-%d',              # 2023-10-26
-                        '%Y-%m-%d %H:%M:%S',     # 2023-10-26 15:30:45
-                        '%m/%d/%Y',              # 10/26/2023
-                        '%m/%d/%Y %H:%M:%S',     # 10/26/2023 15:30:45
-                        '%d-%b-%Y',              # 26-Oct-2023
-                        '%d %b %Y',              # 26 Oct 2023
+                if not date_str or not diagnosis_str:
+                    continue
+                    
+                try:
+                    # Parse the date - should already be in YYYY-MM-DD format
+                    parsed_date = datetime.strptime(str(date_str), '%Y-%m-%d')
+                    parsed_dates.append(parsed_date)
+                    diagnoses.append(str(diagnosis_str))
+                    confidences.append(confidence)
+                    note_ids.append(note_id)
+                except ValueError:
+                    # Try other common date formats as fallback
+                    date_formats = [
+                        '%Y-%m-%d',           # 2024-06-30
+                        '%d/%m/%Y',           # 30/06/2024  
+                        '%m/%d/%Y',           # 06/30/2024
+                        '%d-%m-%Y',           # 30-06-2024
+                        '%d.%m.%Y',           # 30.06.2024
+                        '%d.%m.%y',           # 30.06.24
+                        '%d/%m/%y',           # 30/06/24
+                        '%d-%m-%y',           # 30-06-24
+                        '%Y.%m.%d',           # 2024.06.30
+                        '%d %b %Y',           # 30 Jun 2024
+                        '%d %B %Y',           # 30 June 2024
+                        '%b %d %Y',           # Jun 30 2024
+                        '%B %d %Y',           # June 30 2024
+                        '%d %b %y',           # 30 Jun 24
+                        '%d %B %y',           # 30 June 24
                     ]
-                    
-                    for format_str in timestamp_formats:
+                    parsed = False
+                    for fmt in date_formats:
                         try:
-                            document_timestamp = datetime.strptime(timestamp_str, format_str)
+                            parsed_date = datetime.strptime(str(date_str), fmt)
+                            parsed_dates.append(parsed_date)
+                            diagnoses.append(str(diagnosis_str))
+                            confidences.append(confidence)
+                            note_ids.append(note_id)
+                            parsed = True
                             break
                         except ValueError:
                             continue
                     
-                    if document_timestamp:
-                        print(f"Extracting relative dates using document timestamp: {document_timestamp.strftime('%Y-%m-%d')}")
-                        # Extract relative dates using LLM
-                        relative_dates = extract_relative_dates_llm(clinical_note, document_timestamp, config)
+                    if not parsed:
+                        # Try cleaning common issues like ordinal suffixes and parentheses
+                        cleaned_date = str(date_str).strip('()').strip()
+                        # Remove ordinal suffixes (1st, 2nd, 3rd, 4th, etc.)
+                        cleaned_date = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', cleaned_date)
                         
-                        if relative_dates:
-                            # Append relative dates to existing dates list
-                            diagnoses_list, dates_list = entities
-                            combined_dates_list = dates_list + relative_dates
-                            
-                            # Update entities with combined dates
-                            entities = (diagnoses_list, combined_dates_list)
-                            print(f"Added {len(relative_dates)} relative dates from LLM extraction")
-                        else:
-                            print("No relative dates found by LLM extraction")
-                    else:
-                        print(f"Warning: Could not parse timestamp '{timestamp_str}'")
+                        for fmt in date_formats:
+                            try:
+                                parsed_date = datetime.strptime(cleaned_date, fmt)
+                                parsed_dates.append(parsed_date)
+                                diagnoses.append(str(diagnosis_str))
+                                confidences.append(confidence)
+                                note_ids.append(note_id)
+                                parsed = True
+                                break
+                            except ValueError:
+                                continue
+                    
+                    if not parsed:
+                        # Skip relative dates and other unparseable formats silently
+                        # (like "3 months ago", "next week", etc.)
+                        continue
+                except Exception as e:
+                    print(f"Warning: Could not parse date '{date_str}' for patient {patient_id}: {e}")
+                    continue
+            
+            if not parsed_dates:
+                print(f"Skipping visualization for patient {patient_id}: No valid date entries found")
+                continue
+
+            # Create a DataFrame for plotting
+            timeline_df = pd.DataFrame({
+                'date': parsed_dates,
+                'diagnosis': diagnoses,
+                'confidence': confidences,
+                'note_id': note_ids
+            }).sort_values(by='date')  # Sort chronologically
+
+            # Plot the timeline
+            fig, ax = plt.subplots(figsize=(14, max(6, len(timeline_df) * 0.4)))
+            
+            # Create y-offsets for better visibility
+            if len(timeline_df) > 5:
+                num_levels = min(5, len(timeline_df))  # Max 5 levels
+                y_offsets = [(i % num_levels) * 0.15 - (num_levels // 2 * 0.15) for i in range(len(timeline_df))]
             else:
-                print(f"Warning: Timestamp column '{timestamp_column}' not found in CSV file")
+                y_offsets = [0.1 * (i - len(timeline_df)//2) for i in range(len(timeline_df))]
+
+            # Color code by confidence (if available)
+            colors = ['red' if c < 0.5 else 'orange' if c < 0.8 else 'green' for c in timeline_df['confidence']]
+            
+            # Plot points
+            scatter = ax.scatter(timeline_df['date'], y_offsets, 
+                               s=120, c=colors, alpha=0.7, zorder=5, edgecolors='black', linewidth=1)
+            
+            # Draw horizontal reference line
+            ax.axhline(0, color='gray', lw=1, linestyle='--', alpha=0.5)
+
+            # Add diagnosis labels with note information
+            for i, (date_obj, diagnosis_str, confidence, note_id) in enumerate(
+                zip(timeline_df['date'], timeline_df['diagnosis'], timeline_df['confidence'], timeline_df['note_id'])):
                 
+                vertical_pos = y_offsets[i]
+                
+                # Alternate text position (above/below)
+                text_va = 'bottom' if i % 2 == 0 else 'top'
+                text_y_offset = 0.25 if text_va == 'bottom' else -0.25
+                text_y = vertical_pos + text_y_offset
+                
+                # Create label with diagnosis and note info
+                label_text = f"{diagnosis_str}"
+                if len(set(timeline_df['note_id'])) > 1:  # Only show note ID if multiple notes
+                    label_text += f"\n(Note {note_id})"
+                
+                ax.annotate(label_text, 
+                           xy=(date_obj, vertical_pos),
+                           xytext=(date_obj, text_y),
+                           ha='center',
+                           va=text_va,
+                           arrowprops=dict(arrowstyle="-", color='gray', alpha=0.6, lw=1),
+                           bbox=dict(boxstyle='round,pad=0.3', fc='lightblue', alpha=0.8, 
+                                   ec='black', lw=0.5),
+                           fontsize=9,
+                           zorder=10)
+            
+            # Format the plot
+            ax.set_yticks([])  # Remove y-axis ticks
+            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            ax.spines['bottom'].set_position(('outward', 10))
+
+            # Format dates on x-axis
+            plt.xticks(rotation=45, ha="right")
+            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d'))
+            
+            # Auto-format dates if many
+            if len(timeline_df['date'].unique()) > 8:
+                fig.autofmt_xdate()
+
+            # Add legend for confidence colors
+            legend_elements = [
+                plt.scatter([], [], c='green', s=100, label='High Confidence (≥0.8)', alpha=0.7, edgecolors='black'),
+                plt.scatter([], [], c='orange', s=100, label='Medium Confidence (0.5-0.8)', alpha=0.7, edgecolors='black'),
+                plt.scatter([], [], c='red', s=100, label='Low Confidence (<0.5)', alpha=0.7, edgecolors='black')
+            ]
+            ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1, 1))
+
+            # Title and labels
+            unique_diagnoses = len(set(timeline_df['diagnosis']))
+            date_range = f"{timeline_df['date'].min().strftime('%Y-%m-%d')} to {timeline_df['date'].max().strftime('%Y-%m-%d')}"
+            
+            plt.title(f'Patient {patient_id} - Medical Timeline\n'
+                     f'{len(timeline_df)} diagnoses, {unique_diagnoses} unique conditions\n'
+                     f'({extractor_name}) | {date_range}', 
+                     fontsize=12, pad=20)
+            plt.xlabel('Date', fontsize=11)
+            plt.ylabel('Diagnoses Timeline', fontsize=11)
+            
+            # Adjust layout
+            plt.tight_layout()
+            
+            # Save the plot
+            safe_extractor_name = re.sub(r'[^\w.-]+', '_', extractor_name).lower()
+            plot_filename = os.path.join(output_dir, f"patient_{patient_id}_{safe_extractor_name}_visual_timeline.png")
+            plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
         except Exception as e:
-            print(f"Error extracting relative dates: {e}")
+            print(f"Error generating visual timeline for patient {patient_id}: {e}")
+            if 'fig' in locals():
+                plt.close(fig)
     
-    diagnoses, dates = entities
-    print(f"Found {len(diagnoses)} diagnoses and {len(dates)} dates")
-    
-    relationships = extractor.extract(clinical_note, entities=entities)
-    print(f"Found {len(relationships)} relationships")
-    
-    # Convert to list of (date, diagnosis) tuples
-    output_tuples = [(rel['date'], rel['diagnosis']) for rel in relationships]
-    
-    # Optional: Sort by date string (simple sort, may not be perfectly chronological for all formats)
-    # Consider date parsing from utils.data_preparation for robust sorting if needed.
-    output_tuples.sort(key=lambda x: x[0]) 
-    
-    # Print the list of tuples
-    print("\nExtracted Date-Diagnosis Tuples:")
-    # For slightly cleaner printing:
-    if output_tuples:
-        for dt, dx in output_tuples:
-            print(f"  ('{dt}', '{dx}')")
-    else:
-        print("  []")
-    
-    print("\nDone!")
+    print(f"Generated {len(patient_timelines)} patient visual timeline plots in {output_dir}")
 
 def evaluate_on_dataset():
     """
@@ -278,71 +279,87 @@ def evaluate_on_dataset():
         len(prepared_test_data)
     )
     
-    # Only save predictions to CSV for non-synthetic data
-    if hasattr(config, 'DATA_SOURCE') and config.DATA_SOURCE.lower() != 'synthetic':
-        print(f"\nSaving predictions to {dataset_path}...")
+    # Only save predictions to CSV
+    print(f"\nSaving predictions to {dataset_path}...")
+    
+    try:
+        # Load the original CSV file
+        df = pd.read_csv(dataset_path)
         
-        try:
-            # Load the original CSV file
-            df = pd.read_csv(dataset_path)
+        # Prepare column names
+        safe_extractor_name = extractor.name.lower().replace(' ', '_')
+        predictions_column = f"{safe_extractor_name}_predictions"
+        correctness_column = f"{safe_extractor_name}_is_correct"
+        
+        # Create dictionaries to hold predictions and correctness by note_id
+        note_predictions = {}
+        note_correctness = {}
+        
+        # Group predictions by note_id
+        for pred in all_predictions:
+            note_id = pred['note_id']
+            if note_id not in note_predictions:
+                note_predictions[note_id] = []
             
-            # Prepare column names
-            safe_extractor_name = extractor.name.lower().replace(' ', '_')
-            predictions_column = f"{safe_extractor_name}_predictions"
-            correctness_column = f"{safe_extractor_name}_is_correct"
+            note_predictions[note_id].append({
+                'diagnosis': pred['diagnosis'],
+                'date': pred['date'],
+                'confidence': pred.get('confidence', 1.0)
+            })
+        
+        # Check correctness if gold standard exists
+        if gold_standard:
+            # Convert gold_standard to a set of (note_id, diagnosis, date) tuples for easier comparison
+            gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in gold_standard)
             
-            # Create dictionaries to hold predictions and correctness by note_id
-            note_predictions = {}
-            note_correctness = {}
-            
-            # Group predictions by note_id
+            # Check each prediction against the gold standard
             for pred in all_predictions:
                 note_id = pred['note_id']
-                if note_id not in note_predictions:
-                    note_predictions[note_id] = []
+                is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
                 
-                note_predictions[note_id].append({
-                    'diagnosis': pred['diagnosis'],
-                    'date': pred['date'],
-                    'confidence': pred.get('confidence', 1.0)
-                })
-            
-            # Check correctness if gold standard exists
-            if gold_standard:
-                # Convert gold_standard to a set of (note_id, diagnosis, date) tuples for easier comparison
-                gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in gold_standard)
-                
-                # Check each prediction against the gold standard
-                for pred in all_predictions:
-                    note_id = pred['note_id']
-                    is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
+                if note_id not in note_correctness:
+                    note_correctness[note_id] = []
                     
-                    if note_id not in note_correctness:
-                        note_correctness[note_id] = []
-                        
-                    note_correctness[note_id].append(is_correct)
+                note_correctness[note_id].append(is_correct)
+        
+        # Add predictions to dataframe
+        df[predictions_column] = None
+        if gold_standard:
+            df[correctness_column] = None
             
-            # Add predictions to dataframe
-            df[predictions_column] = None
-            if gold_standard:
-                df[correctness_column] = None
+        # Fill in predictions and correctness columns
+        for i, row in df.iterrows():
+            if i in note_predictions:
+                df.at[i, predictions_column] = json.dumps(note_predictions[i])
                 
-            # Fill in predictions and correctness columns
-            for i, row in df.iterrows():
-                if i in note_predictions:
-                    df.at[i, predictions_column] = json.dumps(note_predictions[i])
-                    
-                    if i in note_correctness:
-                        df.at[i, correctness_column] = json.dumps(note_correctness[i])
+                if i in note_correctness:
+                    df.at[i, correctness_column] = json.dumps(note_correctness[i])
+        
+        # Save the updated dataframe back to CSV
+        df.to_csv(dataset_path, index=False)
+        print(f"Successfully saved predictions to column '{predictions_column}'")
+        if gold_standard:
+            print(f"Successfully saved correctness indicators to column '{correctness_column}'")
             
-            # Save the updated dataframe back to CSV
-            df.to_csv(dataset_path, index=False)
-            print(f"Successfully saved predictions to column '{predictions_column}'")
-            if gold_standard:
-                print(f"Successfully saved correctness indicators to column '{correctness_column}'")
-                
-        except Exception as e:
-            print(f"Error saving predictions to CSV: {e}")
+    except Exception as e:
+        print(f"Error saving predictions to CSV: {e}")
+    
+    # Generate patient timelines if configured
+    if config.GENERATE_PATIENT_TIMELINES:
+        print("\nGenerating patient timelines...")
+        timeline_output_dir = os.path.join(project_root, config.TIMELINE_OUTPUT_DIR)
+        
+        # Aggregate predictions by patient
+        patient_timelines = aggregate_predictions_by_patient(all_predictions)
+        
+        # Generate individual timeline files
+        generate_patient_timelines(patient_timelines, timeline_output_dir, extractor.name)
+        
+        # Generate summary report
+        generate_patient_timeline_summary(patient_timelines, timeline_output_dir, extractor.name)
+        
+        # Generate visual timeline plots
+        generate_patient_timeline_visualizations(patient_timelines, timeline_output_dir, extractor.name)
     
     print("\nEvaluation Done!")
 
@@ -398,13 +415,12 @@ def compare_all_methods():
     
     # For CSV updates
     original_df = None
-    if hasattr(config, 'DATA_SOURCE') and config.DATA_SOURCE.lower() != 'synthetic':
-        try:
-            original_df = pd.read_csv(dataset_path)
-            print(f"Loaded original CSV with {len(original_df)} rows")
-        except Exception as e:
-            print(f"Warning: Could not load original CSV for saving predictions: {e}")
-            original_df = None
+    try:
+        original_df = pd.read_csv(dataset_path)
+        print(f"Loaded original CSV with {len(original_df)} rows")
+    except Exception as e:
+        print(f"Warning: Could not load original CSV for saving predictions: {e}")
+        original_df = None
     
     with tqdm(total=len(extractors_to_compare), desc="Comparing methods", unit="method") as pbar:
         for extractor in extractors_to_compare:
@@ -424,6 +440,23 @@ def compare_all_methods():
                 len(prepared_test_data)
             )
             all_method_metrics[extractor.name] = metrics
+            
+            # Generate patient timelines if configured
+            if config.GENERATE_PATIENT_TIMELINES:
+                print(f"Generating patient timelines for {extractor.name}...")
+                timeline_output_dir = os.path.join(project_root, config.TIMELINE_OUTPUT_DIR)
+                
+                # Aggregate predictions by patient
+                patient_timelines = aggregate_predictions_by_patient(all_predictions)
+                
+                # Generate individual timeline files
+                generate_patient_timelines(patient_timelines, timeline_output_dir, extractor.name)
+                
+                # Generate summary report
+                generate_patient_timeline_summary(patient_timelines, timeline_output_dir, extractor.name)
+                
+                # Generate visual timeline plots
+                generate_patient_timeline_visualizations(patient_timelines, timeline_output_dir, extractor.name)
             
             # Save predictions to CSV if applicable
             if original_df is not None:
@@ -510,10 +543,10 @@ def plot_comparison(method_metrics):
     comparison_df = pd.DataFrame(method_metrics).T  # Transpose
     
     print("\nComparison results:")
-    # Select only P, R, F1 for printing summary, but keep others for potential use
-    print(comparison_df[['precision', 'recall', 'f1']].round(3))
+    # Select P, R, F1, and Accuracy for printing summary, but keep others for potential use
+    print(comparison_df[['precision', 'recall', 'f1', 'accuracy']].round(3))
 
-    metrics_to_plot = ['precision', 'recall', 'f1']
+    metrics_to_plot = ['precision', 'recall', 'f1', 'accuracy']
     try:
         plot_df = comparison_df[[col for col in metrics_to_plot if col in comparison_df.columns]]  # Ensure columns exist
         if not plot_df.empty:
@@ -530,7 +563,7 @@ def plot_comparison(method_metrics):
             print(f"\nComparison plot saved to {plot_save_path}")
             plt.close()
         else:
-            print("\nSkipping comparison plot: No P/R/F1 data available.")
+            print("\nSkipping comparison plot: No precision/recall/F1/accuracy data available.")
     except Exception as e:
         print(f"\nError generating comparison plot: {e}")
 
@@ -540,13 +573,10 @@ if __name__ == "__main__":
     
     print(f"--- Running Mode: {run_mode} ---")
     
-    if run_mode == 'single':
-        print(f"--- Method: {config.EXTRACTION_METHOD} ---")
-        test_single_note()
-    elif run_mode == 'evaluate':
+    if run_mode == 'evaluate':
         print(f"--- Method: {config.EXTRACTION_METHOD} ---")
         evaluate_on_dataset()
     elif run_mode == 'compare':
         compare_all_methods()
     else:
-        print(f"Error: Invalid RUN_MODE '{config.RUN_MODE}' in config.py. Options are: 'single', 'evaluate', 'compare'.") 
+        print(f"Error: Invalid RUN_MODE '{config.RUN_MODE}' in config.py. Options are: 'evaluate', 'compare'.") 

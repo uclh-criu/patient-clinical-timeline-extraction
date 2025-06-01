@@ -2,7 +2,6 @@ import os
 import json
 import torch
 from extractors.base_extractor import BaseRelationExtractor
-from utils.extraction_utils import extract_entities
 from tqdm import tqdm
 
 class LlamaExtractor(BaseRelationExtractor):
@@ -82,10 +81,12 @@ class LlamaExtractor(BaseRelationExtractor):
             print("Llama model not initialized. Call load() first.")
             return []
         
+        # Entities are required for CSV data processing
         if entities is None:
-            diagnoses, dates = extract_entities(text)
-        else:
-            diagnoses, dates = entities
+            print("Error: entities parameter is required for CSV data processing.")
+            return []
+        
+        diagnoses, dates = entities
         
         # Extract diagnosis names and positions
         diagnoses_info = [{"diagnosis": d[0], "position": d[1]} for d in diagnoses]

@@ -2,19 +2,18 @@ import os
 import json
 from dotenv import load_dotenv
 from extractors.base_extractor import BaseRelationExtractor
-from utils.extraction_utils import extract_entities
 
-class LLMExtractor(BaseRelationExtractor):
+class OpenAIExtractor(BaseRelationExtractor):
     """
-    Relation extractor that uses a Large Language Model (LLM) via OpenAI's API 
-    to identify diagnosis-date relationships.
+    Relation extractor that uses OpenAI's API to identify diagnosis-date 
+    relationships in clinical notes.
     
     Requires OPENAI_API_KEY to be set in a .env file in the project root.
     """
     
     def __init__(self, config):
         """
-        Initialize the LLM extractor.
+        Initialize the OpenAI extractor.
         
         Args:
             config: Configuration object or dict with necessary parameters.
@@ -22,7 +21,7 @@ class LLMExtractor(BaseRelationExtractor):
         self.config = config
         self.api_key = None 
         self.model_name = config.OPENAI_MODEL if hasattr(config, 'OPENAI_MODEL') else 'gpt-4o'
-        self.name = f"LLM ({self.model_name})"
+        self.name = f"OpenAI ({self.model_name})"
         self.client = None
         
     def load(self):
@@ -51,7 +50,7 @@ class LLMExtractor(BaseRelationExtractor):
             
             # Initialize OpenAI client
             self.client = OpenAI(api_key=self.api_key)
-            print("LLM Extractor: OpenAI client initialized successfully.")
+            print("OpenAI Extractor: Client initialized successfully.")
             return True
         except Exception as e:
             print(f"Error setting up OpenAI client: {e}")
@@ -59,7 +58,7 @@ class LLMExtractor(BaseRelationExtractor):
     
     def extract(self, text, entities=None):
         """
-        Extract relationships using the configured LLM via OpenAI API.
+        Extract relationships using OpenAI's API.
         
         Args:
             text (str): The clinical note text.
@@ -74,13 +73,15 @@ class LLMExtractor(BaseRelationExtractor):
                 }
         """
         if self.client is None:
-            print("LLM client (OpenAI) not initialized. Call load() first.")
+            print("OpenAI client not initialized. Call load() first.")
             return []
         
+        # Entities are required for CSV data processing
         if entities is None:
-            diagnoses, dates = extract_entities(text)
-        else:
-            diagnoses, dates = entities
+            print("Error: entities parameter is required for CSV data processing.")
+            return []
+        
+        diagnoses, dates = entities
         
         # Extract diagnosis names and positions
         diagnoses_info = [{"diagnosis": d[0], "position": d[1]} for d in diagnoses]
@@ -141,9 +142,9 @@ class LLMExtractor(BaseRelationExtractor):
                          rel['confidence'] = 1.0 
                 return relationships
             else:
-                print(f"Error: Could not find JSON array in LLM response: {response_text}")
+                print(f"Error: Could not find JSON array in OpenAI response: {response_text}")
                 return []
             
         except Exception as e:
-            print(f"Error during LLM API call or processing: {e}")
+            print(f"Error during OpenAI API call or processing: {e}")
             return [] 

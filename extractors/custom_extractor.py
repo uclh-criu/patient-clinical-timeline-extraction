@@ -4,7 +4,6 @@ from extractors.base_extractor import BaseRelationExtractor
 from model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
 from model_training.Vocabulary import Vocabulary
 from model_training.training_config import EMBEDDING_DIM, HIDDEN_DIM
-from utils.extraction_utils import extract_entities
 from utils.training_utils import preprocess_note_for_prediction, create_prediction_dataset
 
 class CustomExtractor(BaseRelationExtractor):
@@ -94,18 +93,11 @@ class CustomExtractor(BaseRelationExtractor):
             return []
         
         if entities is None:
-            # This call should return a tuple of two lists
-            diagnoses, dates = extract_entities(text) 
-        else:
-            # This is the suspected line causing the "too many values" error:
-            diagnoses, dates = entities 
+            print("Error: entities parameter is required for CSV data processing.")
+            return []
         
-        # Use prediction-specific parameters when calling utils
-        # Check if the previous unpacking succeeded before proceeding
-        if diagnoses is None or dates is None: 
-             print("Error: Diagnoses or dates list is None after unpacking/extraction.")
-             return [] # Avoid further errors if unpacking failed silently somehow
-
+        diagnoses, dates = entities
+        
         features = preprocess_note_for_prediction(text, self.pred_max_distance)
         # Pass the confirmed lists to the next function
         test_data = create_prediction_dataset(features, self.vocab, self.device, 

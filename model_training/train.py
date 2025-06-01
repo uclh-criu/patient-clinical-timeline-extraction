@@ -15,11 +15,11 @@ sys.path.append(project_root)
 # Import from our modules using adjusted paths
 # Files within the same directory (model_training)
 from DiagnosisDateRelationModel import DiagnosisDateRelationModel 
-from model_training.Vocabulary import Vocabulary 
+from model_training.Vocabulary import Vocabulary
+from ClinicalNoteDataset import ClinicalNoteDataset
 import training_config 
 
 # Files from other top-level directories
-from data.ClinicalNoteDataset import ClinicalNoteDataset
 from data.synthetic_data_generator import generate_dataset
 from utils.training_utils import load_and_prepare_data
 from utils.training_utils import train_model, plot_training_curves

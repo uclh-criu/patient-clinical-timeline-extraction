@@ -26,246 +26,44 @@ def get_data_path(config):
         str: Path to the dataset file to be used.
     """
     if not hasattr(config, 'DATA_SOURCE'):
-        # Default to synthetic data if DATA_SOURCE is not defined
-        return getattr(config, 'SYNTHETIC_DATASET_PATH', 'data/synthetic_data.json')
+        raise ValueError("DATA_SOURCE not defined in config")
     
     data_source = config.DATA_SOURCE.lower()
     
-    if data_source == 'synthetic':
-        return getattr(config, 'SYNTHETIC_DATASET_PATH', 'data/synthetic_data.json')
-    elif data_source == 'imaging':
-        return getattr(config, 'IMAGING_DATA_PATH', 'data/epic_imaging_reports.csv')
+    if data_source == 'imaging':
+        return getattr(config, 'IMAGING_DATA_PATH', 'data/processed_notes_with_dates_and_disorders_imaging.csv')
     elif data_source == 'notes':
-        return getattr(config, 'NOTES_DATA_PATH', 'data/epic_notes.csv')
+        return getattr(config, 'NOTES_DATA_PATH', 'data/processed_notes_with_dates_and_disorders_notes.csv')
     elif data_source == 'letters':
-        return getattr(config, 'LETTERS_DATA_PATH', 'data/epic_letters.csv')
+        return getattr(config, 'LETTERS_DATA_PATH', 'data/processed_notes_with_dates_and_disorders_letters.csv')
     elif data_source == 'sample':
         return getattr(config, 'SAMPLE_DATA_PATH', 'data/sample.csv')
+    elif data_source == 'synthetic':
+        return getattr(config, 'SYNTHETIC_DATA_PATH', 'data/synthetic.csv')
     else:
-        # Default to synthetic data if DATA_SOURCE is not recognized
-        print(f"WARNING: Unrecognized DATA_SOURCE '{data_source}'. Using synthetic data.")
-        return getattr(config, 'SYNTHETIC_DATASET_PATH', 'data/synthetic_data.json')
+        raise ValueError(f"Unrecognized DATA_SOURCE '{data_source}'. Valid options are: 'imaging', 'notes', 'letters', 'sample', 'synthetic'")
 
-# Parse date string (Moved from data_preparation)
-def parse_date_string(date_str):
-    """
-    Parse a date string in various formats and return a standard YYYY-MM-DD format.
-    Returns None if parsing fails.
-    """
-    date_str = date_str.strip()
-    
-    try:
-        # Try common formats using datetime.strptime
-        formats = [
-            # DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY
-            '%d-%m-%Y', '%d/%m/%Y', '%d.%m.%Y',
-            # DD-MM-YY, DD/MM/YY, DD.MM.YY
-            '%d-%m-%y', '%d/%m/%y', '%d.%m.%y',
-            # YYYY-MM-DD
-            '%Y-%m-%d',
-            # Month names
-            '%d %b %Y', '%d %B %Y',
-            '%d %b\'%y', '%dst %b %Y', '%dnd %b %Y', '%drd %b %Y', '%dth %b %Y'
-        ]
-        
-        for fmt in formats:
-            try:
-                date_obj = datetime.strptime(date_str, fmt)
-                return date_obj.strftime('%Y-%m-%d')
-            except ValueError:
-                continue
-                
-        # If still not parsed, try more complex regex patterns
-        # 1. Match patterns like "3rd Feb'23" or "3rd February 2023"
-        match = re.search(r'(\d+)(?:st|nd|rd|th)?\s+([a-zA-Z]+)[\']*\s*[\']*(\d{2,4})', date_str)
-        if match:
-            day, month_str, year = match.groups()
-            
-            month_names = {
-                'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-                'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-            }
-            month = month_names.get(month_str.lower()[:3])
-            if month:
-                if len(year) == 2: year = '20' + year
-                date_obj = datetime(int(year), month, int(day))
-                return date_obj.strftime('%Y-%m-%d')
-        
-        # 2. Try to match date with time like "02/02/2023 @1445"
-        match = re.search(r'(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})\s*[@at]*\s*\d+', date_str)
-        if match:
-            # Recursive call to handle the extracted date part
-            return parse_date_string(match.group(1))
-            
-        return None
-    except Exception:
-        return None
-
-# Extract diagnoses and dates with their positions from text
-def extract_entities(text):
-    """
-    Extract underscore-formatted diagnoses and parenthesized dates with their positions.
-    Parses dates into YYYY-MM-DD format.
-    Returns diagnoses as [(diag_str, pos)] and dates as [(parsed_date_str, raw_date_str, pos)].
-    """
-    # Handle None, nan, or empty string input
-    if text is None or pd.isna(text):
-        return [], []
-    if isinstance(text, str) and (text.strip() == '' or text.lower() == 'nan'):
-        return [], []
-
-    diagnoses = []
-    # Regex captures one or more word characters (alphanumeric + underscore)
-    # followed by [dx], [diagnosis], or [diagno sis]
-    for match in re.finditer(r'(\w+)\[(?:dx|diagnosis|diagno\s*sis)\]', text):
-        diagnosis = match.group(1).lower() # Capture group 1 (the diagnosis), ensure lowercase
-        position = match.start(1) # Start position of the captured diagnosis word
-        diagnoses.append((diagnosis, position))
-
-    dates = []
-    # Regex to capture content within parentheses followed by [date]
-    for match in re.finditer(r'\(([^)]+)\)\[date\]', text):
-        raw_date_str = match.group(1).strip()
-        position = match.start(1) # Position of the content inside parentheses
-        
-        # Parse the date string here
-        parsed_date = parse_date_string(raw_date_str)
-        
-        # Only add if parsing was successful
-        if parsed_date:
-            dates.append((parsed_date, raw_date_str, position))
-    
-    # Print diagnostic info only if text is valid and entities weren't found
-    if isinstance(text, str) and text.strip() and text.lower() != 'nan':
-        if not diagnoses:
-            print("Warning: No diagnoses found in the text. Check the text format.")
-            print(f"Text sample (first 100 chars): {text[:100]}...")
-        
-        if not dates:
-            print("Warning: No dates found in the text. Check the text format.")
-            print(f"Text sample (first 100 chars): {text[:100]}...")
-
-    return diagnoses, dates
-
-# Helper function to load dataset, select samples, prepare gold standard, and extract entities
 def load_and_prepare_data(dataset_path, num_samples, config=None):
     """
     Loads dataset, selects samples, prepares gold standard, and pre-extracts entities.
-    Supports both synthetic data from JSON and real data from CSV.
+    Supports real data from CSV files.
     
     Args:
-        dataset_path (str): Path to the dataset file (JSON or CSV).
+        dataset_path (str): Path to the dataset file (CSV) - this parameter is ignored if config is provided.
         num_samples (int): Maximum number of samples to use (if provided).
-        config: Configuration object to determine the data source.
-
-    Returns:
-        tuple: (prepared_test_data, gold_standard) or (None, None) if loading fails.
-               prepared_test_data is a list of dicts {'text': ..., 'entities': ...}.
-               gold_standard is a list of dicts {'note_id': ..., 'diagnosis': ..., 'date': ...}.
-    """
-    # If config is provided, use it to get the correct dataset path
-    if config:
-        dataset_path = get_data_path(config)
-    
-    # Determine if we're using real data
-    using_real_data = False
-    if config and hasattr(config, 'DATA_SOURCE'):
-        using_real_data = config.DATA_SOURCE.lower() != 'synthetic'
-    
-    if using_real_data:
-        return load_real_data(config, num_samples)
-    else:
-        return load_synthetic_data(dataset_path, num_samples)
-
-def load_synthetic_data(dataset_path, num_samples):
-    """
-    Loads synthetic data from a JSON file.
-    """
-    if not os.path.exists(dataset_path):
-        print(f"Error: Dataset not found at {dataset_path}")
-        return None, None
-
-    print(f"Loading synthetic dataset from {dataset_path}...")
-    try:
-        with open(dataset_path, 'r') as f:
-            full_dataset = json.load(f)
-    except Exception as e:
-        print(f"Error loading dataset: {e}")
-        return None, None
-
-    # Calculate the 80/20 split point
-    split_point = int(len(full_dataset) * 0.8)
-    
-    # Use the last 20% of the dataset for evaluation
-    dataset = full_dataset[split_point:]
-    print(f"Using last {len(dataset)}/{len(full_dataset)} samples (20%) for evaluation.")
-    
-    # If a specific number of samples is requested, limit to that
-    if num_samples and num_samples < len(dataset):
-        test_data = dataset[:num_samples]
-        print(f"Limiting to {num_samples} evaluation samples.")
-    else:
-        test_data = dataset
-        print(f"Using all {len(test_data)} evaluation samples.")
-
-    # Prepare gold standard list with progress bar
-    gold_standard = []
-    with tqdm(total=len(test_data), desc="Preparing gold standard", unit="note") as pbar:
-        for i, entry in enumerate(test_data):
-            # Check if 'ground_truth' exists and is iterable
-            if 'ground_truth' in entry and isinstance(entry['ground_truth'], list):
-                 for section in entry['ground_truth']:
-                    # Check if 'date' and 'diagnoses' exist
-                    if 'date' in section and 'diagnoses' in section and isinstance(section['diagnoses'], list):
-                        for diag in section['diagnoses']:
-                            # Check if 'diagnosis' exists
-                            if 'diagnosis' in diag:
-                                 gold_standard.append({
-                                    'note_id': i,
-                                    'diagnosis': str(diag['diagnosis']).lower(), # Ensure string and lower
-                                    'date': section['date'] # Assume date is already YYYY-MM-DD
-                                })
-                            else:
-                                 print(f"Warning: Missing 'diagnosis' key in note {i}, section date {section.get('date', 'N/A')}")
-                    else:
-                         print(f"Warning: Missing 'date' or 'diagnoses' key, or 'diagnoses' not a list in note {i}, section date {section.get('date', 'N/A')}")
-            else:
-                 print(f"Warning: Missing or invalid 'ground_truth' in note {i}")
-            
-            # Update progress bar
-            pbar.update(1)
-
-    print(f"Prepared gold standard with {len(gold_standard)} relationships.")
-
-    # Pre-extract entities for efficiency with progress bar
-    print("Pre-extracting entities...")
-    prepared_test_data = []
-    with tqdm(total=len(test_data), desc="Pre-extracting entities", unit="note") as pbar:
-        for entry in test_data:
-            text = entry.get('clinical_note', '') # Handle missing 'clinical_note'
-            entities = extract_entities(text)
-            prepared_test_data.append({
-                'note': text,
-                'entities': entities
-            })
-            # Update progress bar
-            pbar.update(1)
-
-    return prepared_test_data, gold_standard
-
-def load_real_data(config, num_samples):
-    """
-    Loads real data from a CSV file.
-    
-    Args:
-        config: The configuration object containing paths and column names.
-        num_samples (int): Maximum number of samples to use (if provided).
+        config: Configuration object containing paths and column names.
         
     Returns:
         tuple: (prepared_test_data, gold_standard) or (None, None) if loading fails.
+               prepared_test_data is a list of dicts {'patient_id': ..., 'note_id': ..., 'note': ..., 'entities': ...}.
+               gold_standard is a list of dicts {'note_id': ..., 'patient_id': ..., 'diagnosis': ..., 'date': ...}.
     """
-    dataset_path = get_data_path(config)
+    # If config is provided, use it to get the correct dataset path (ignore the passed dataset_path)
+    if config:
+        dataset_path = get_data_path(config)
+    
     text_column = config.REAL_DATA_TEXT_COLUMN
+    patient_id_column = getattr(config, 'REAL_DATA_PATIENT_ID_COLUMN', None)
     gold_column = getattr(config, 'REAL_DATA_GOLD_COLUMN', None)
     
     # Get column names for annotations if they exist in config
@@ -274,10 +72,10 @@ def load_real_data(config, num_samples):
     timestamp_column = getattr(config, 'REAL_DATA_TIMESTAMP_COLUMN', None)
     
     if not os.path.exists(dataset_path):
-        print(f"Error: Real dataset not found at {dataset_path}")
+        print(f"Error: Dataset not found at {dataset_path}")
         return None, None
     
-    print(f"Loading real dataset from {dataset_path}...")
+    print(f"Loading dataset from {dataset_path}...")
     try:
         # Read the CSV file
         df = pd.read_csv(dataset_path)
@@ -340,6 +138,7 @@ def load_real_data(config, num_samples):
                                     if 'diagnosis' in diag:
                                         gold_standard.append({
                                             'note_id': i,
+                                            'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                             'diagnosis': str(diag['diagnosis']).lower(),
                                             'date': date  # Already in YYYY-MM-DD format
                                         })
@@ -349,6 +148,7 @@ def load_real_data(config, num_samples):
                                 if 'diagnosis' in rel and 'date' in rel:
                                     gold_standard.append({
                                         'note_id': i,
+                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                         'diagnosis': str(rel['diagnosis']).lower(),
                                         'date': rel['date'] # Assume date is already YYYY-MM-DD
                                     })
@@ -485,15 +285,14 @@ def load_real_data(config, num_samples):
                     if i < 3:  # Just for debugging, show first few
                         print(f"Row {i}: No annotations available, using empty entities")
             else:
-                # For synthetic data or when annotations aren't available, we extract entities from text
-                if config.DATA_SOURCE.lower() == 'synthetic':
-                    entities = extract_entities(text)
-                else:
-                    if i < 3:  # Reduce output
-                        print(f"Row {i}: Using pre-annotated entities from annotation columns")
+                # When annotations aren't available, use empty entities for real data
+                if i < 3:  # Reduce output
+                    print(f"Row {i}: Using pre-annotated entities from annotation columns")
             
             # Add to prepared data
             prepared_test_data.append({
+                'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                'note_id': i,
                 'note': text,
                 'entities': entities
             })
@@ -514,15 +313,17 @@ def run_extraction(extractor, prepared_test_data):
 
     Args:
         extractor: An initialized and loaded extractor object (subclass of BaseExtractor).
-        prepared_test_data (list): List of dicts {'text': ..., 'entities': ...}.
+        prepared_test_data (list): List of dicts {'patient_id': ..., 'note_id': ..., 'note': ..., 'entities': ...}.
 
     Returns:
-        list: List of predicted relationships [{'note_id': ..., 'diagnosis': ..., 'date': ..., 'confidence': ...}].
+        list: List of predicted relationships [{'note_id': ..., 'patient_id': ..., 'diagnosis': ..., 'date': ..., 'confidence': ...}].
     """
     print(f"Generating predictions using {extractor.name}...")
     all_predictions = []
     skipped_rels = 0
-    for i, note_entry in enumerate(tqdm(prepared_test_data, desc=f"Processing with {extractor.name}", unit="note")):
+    for note_entry in tqdm(prepared_test_data, desc=f"Processing with {extractor.name}", unit="note"):
+        note_id = note_entry['note_id']
+        patient_id = note_entry['patient_id']
         try:
             # Extract relationships using the provided extractor
             relationships = extractor.extract(note_entry['note'], entities=note_entry['entities'])
@@ -531,28 +332,28 @@ def run_extraction(extractor, prepared_test_data):
                 raw_date = rel.get('date')
                 raw_diagnosis = rel.get('diagnosis')
                 if raw_date is None or raw_diagnosis is None:
-                    print(f"Warning: Skipping relationship in note {i} due to missing 'date' or 'diagnosis'. Rel: {rel}")
+                    print(f"Warning: Skipping relationship in note {note_id} due to missing 'date' or 'diagnosis'. Rel: {rel}")
                     skipped_rels += 1
                     continue
 
-                # Parse date and normalize diagnosis
-                parsed_date = parse_date_string(str(raw_date)) # Ensure string input
+                # Normalize diagnosis (dates should already be in YYYY-MM-DD format from CSV data)
                 normalized_diagnosis = str(raw_diagnosis).strip().lower() # Ensure string, strip, lower
+                date_str = str(raw_date).strip() # Ensure string and strip whitespace
 
-                if parsed_date and normalized_diagnosis:
+                if date_str and normalized_diagnosis:
                     all_predictions.append({
-                        'note_id': i,
+                        'note_id': note_id,
+                        'patient_id': patient_id,
                         'diagnosis': normalized_diagnosis,
-                        'date': parsed_date,
+                        'date': date_str,
                         'confidence': rel.get('confidence', 1.0) # Default confidence to 1.0 if missing
                     })
                 else:
-                    # Log if parsing failed but keys were present
-                    # print(f"Debug: Skipping relationship in note {i} due to parsing failure. Raw Date: '{raw_date}', Raw Diag: '{raw_diagnosis}'")
+                    # Log if validation failed
                     skipped_rels += 1
         except Exception as e:
             # Log errors during extraction for a specific note
-            print(f"Extraction error on note {i} for {extractor.name}: {e}")
+            print(f"Extraction error on note {note_id} for {extractor.name}: {e}")
             # Optionally, re-raise if you want errors to halt execution: raise e
             continue # Continue with the next note
 
@@ -580,7 +381,7 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
         print(f"  No gold standard data provided for {extractor_name} (processed {total_notes_processed} notes). Skipping metric calculation.")
         # Return zeroed metrics if no gold standard
         return {
-            'precision': 0, 'recall': 0, 'f1': 0,
+            'precision': 0, 'recall': 0, 'f1': 0, 'accuracy': 0,
             'true_positives': 0, 'false_positives': 0, 'false_negatives': 0
         }
 
@@ -591,7 +392,7 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
     if num_labeled_notes == 0:
         print(f"  No notes with gold standard labels found for {extractor_name} (processed {total_notes_processed} notes). Skipping metric calculation.")
         return {
-            'precision': 0, 'recall': 0, 'f1': 0,
+            'precision': 0, 'recall': 0, 'f1': 0, 'accuracy': 0,
             'true_positives': 0, 'false_positives': 0, 'false_negatives': 0
         }
     
@@ -624,6 +425,10 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
     precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
     recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    
+    # Calculate accuracy: (TP + TN) / (TP + TN + FP + FN)
+    # Note: TN is set to 0 since it's ill-defined for this task, so accuracy = TP / (TP + FP + FN)
+    accuracy = true_positives / (true_positives + false_positives + false_negatives) if (true_positives + false_positives + false_negatives) > 0 else 0
 
     # --- Reporting ---
     print(f"  Evaluation Results for {extractor_name} (on labeled subset):")
@@ -635,6 +440,7 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
     print(f"    Precision: {precision:.3f}")
     print(f"    Recall:    {recall:.3f}")
     print(f"    F1 Score:  {f1:.3f}")
+    print(f"    Accuracy:  {accuracy:.3f}")
 
     # --- Plotting ---
     # Plotting confusion matrix based on these filtered values
@@ -663,6 +469,7 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
         'precision': precision,
         'recall': recall,
         'f1': f1,
+        'accuracy': accuracy,
         'true_positives': true_positives,
         'false_positives': false_positives,
         'false_negatives': false_negatives,
@@ -1059,3 +866,128 @@ def extract_relative_dates_llama(text, document_timestamp, config):
     except Exception as e:
         print(f"Error in Llama relative date extraction: {e}")
         return []
+
+def aggregate_predictions_by_patient(all_predictions):
+    """
+    Aggregate predictions by patient to create patient timelines.
+    
+    Args:
+        all_predictions (list): List of predicted relationships with patient_id, note_id, diagnosis, date, confidence.
+        
+    Returns:
+        dict: Dictionary with patient_id as keys and list of diagnosis-date relationships as values.
+              Format: {patient_id: [{'diagnosis': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
+    """
+    patient_timelines = {}
+    
+    for prediction in all_predictions:
+        patient_id = prediction.get('patient_id')
+        if patient_id is None:
+            continue
+            
+        if patient_id not in patient_timelines:
+            patient_timelines[patient_id] = []
+        
+        patient_timelines[patient_id].append({
+            'diagnosis': prediction['diagnosis'],
+            'date': prediction['date'],
+            'confidence': prediction.get('confidence', 1.0),
+            'note_id': prediction['note_id']
+        })
+    
+    # Sort each patient's timeline by date
+    for patient_id in patient_timelines:
+        patient_timelines[patient_id].sort(key=lambda x: x['date'])
+    
+    return patient_timelines
+
+def generate_patient_timelines(patient_timelines, output_dir, extractor_name):
+    """
+    Generate and save patient timeline files.
+    
+    Args:
+        patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
+        output_dir (str): Directory to save timeline files.
+        extractor_name (str): Name of the extractor for file naming.
+    """
+    if not patient_timelines:
+        print(f"No patient timelines to generate for {extractor_name}")
+        return
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate timeline for each patient
+    for patient_id, timeline in patient_timelines.items():
+        if not timeline:
+            continue
+            
+        # Create timeline filename
+        safe_extractor_name = re.sub(r'[^\w.-]+', '_', extractor_name).lower()
+        timeline_filename = f"patient_{patient_id}_{safe_extractor_name}_timeline.txt"
+        timeline_path = os.path.join(output_dir, timeline_filename)
+        
+        # Write timeline to file
+        with open(timeline_path, 'w', encoding='utf-8') as f:
+            f.write(f"Patient {patient_id} Timeline (Generated by {extractor_name})\n")
+            f.write("=" * 60 + "\n\n")
+            
+            for entry in timeline:
+                f.write(f"Date: {entry['date']}\n")
+                f.write(f"Diagnosis: {entry['diagnosis']}\n")
+                f.write(f"Confidence: {entry['confidence']:.3f}\n")
+                f.write(f"Source Note: {entry['note_id']}\n")
+                f.write("-" * 40 + "\n")
+            
+            # Summary statistics
+            f.write(f"\nSummary:\n")
+            f.write(f"Total diagnoses: {len(timeline)}\n")
+            f.write(f"Unique diagnoses: {len(set(entry['diagnosis'] for entry in timeline))}\n")
+            f.write(f"Date range: {timeline[0]['date']} to {timeline[-1]['date']}\n")
+    
+    print(f"Generated {len(patient_timelines)} patient timeline files in {output_dir}")
+
+def generate_patient_timeline_summary(patient_timelines, output_dir, extractor_name):
+    """
+    Generate a summary report of all patient timelines.
+    
+    Args:
+        patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
+        output_dir (str): Directory to save the summary file.
+        extractor_name (str): Name of the extractor for file naming.
+    """
+    if not patient_timelines:
+        return
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    safe_extractor_name = re.sub(r'[^\w.-]+', '_', extractor_name).lower()
+    summary_filename = f"patient_timelines_summary_{safe_extractor_name}.txt"
+    summary_path = os.path.join(output_dir, summary_filename)
+    
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        f.write(f"Patient Timeline Summary - {extractor_name}\n")
+        f.write("=" * 60 + "\n\n")
+        
+        # Overall statistics
+        total_patients = len(patient_timelines)
+        total_diagnoses = sum(len(timeline) for timeline in patient_timelines.values())
+        avg_diagnoses_per_patient = total_diagnoses / total_patients if total_patients > 0 else 0
+        
+        f.write(f"Total Patients: {total_patients}\n")
+        f.write(f"Total Diagnoses: {total_diagnoses}\n")
+        f.write(f"Average Diagnoses per Patient: {avg_diagnoses_per_patient:.2f}\n\n")
+        
+        # Per-patient summary
+        f.write("Per-Patient Summary:\n")
+        f.write("-" * 40 + "\n")
+        
+        for patient_id, timeline in sorted(patient_timelines.items()):
+            if timeline:
+                unique_diagnoses = len(set(entry['diagnosis'] for entry in timeline))
+                date_range = f"{timeline[0]['date']} to {timeline[-1]['date']}"
+                f.write(f"Patient {patient_id}: {len(timeline)} diagnoses, {unique_diagnoses} unique, {date_range}\n")
+            else:
+                f.write(f"Patient {patient_id}: No diagnoses\n")
+    
+    print(f"Generated patient timeline summary: {summary_path}")
