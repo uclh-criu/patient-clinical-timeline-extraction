@@ -3,7 +3,7 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used.
 # Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic'
-DATA_SOURCE = 'synthetic'
+DATA_SOURCE = 'sample'
 
 # --- LLM (OpenAI) Extractor Parameters --- #
 OPENAI_MODEL = 'gpt-4o'

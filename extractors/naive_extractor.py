@@ -63,7 +63,7 @@ class NaiveExtractor(BaseRelationExtractor):
                 
                 if distance < min_distance and distance <= self.max_distance:
                     min_distance = distance
-                    closest_date = date_str # Use the raw date string found nearby
+                    closest_date = parsed_date # Use the formatted date
             
             if closest_date:
                 relationships.append({
