@@ -106,7 +106,7 @@ class LlamaExtractor(BaseRelationExtractor):
         Return ONLY a JSON array where each object represents a likely relationship and has the following structure:
         {{
             "diagnosis": "name of diagnosis from the Diagnoses Info list",
-            "date": "the RAW date string (from raw_date field) associated with the diagnosis",
+            "date": "the parsed date (from parsed_date field) associated with the diagnosis in YYYY-MM-DD format",
             "confidence": a number between 0 and 1 indicating your confidence in this association
         }}
         Do not include diagnoses that have no associated date in the output.
