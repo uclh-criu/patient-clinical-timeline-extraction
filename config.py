@@ -18,7 +18,7 @@ RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama'
-EXTRACTION_METHOD = 'llama'
+EXTRACTION_METHOD = 'naive'
 
 # Methods to include when running in 'compare' mode
 COMPARISON_METHODS = ['naive']
@@ -29,9 +29,9 @@ TIMELINE_OUTPUT_DIR = 'experiment_outputs/timelines'
 
 # --- Relative Date Extraction LLM Settings --- #
 ENABLE_RELATIVE_DATE_EXTRACTION = True      # Whether to extract relative dates
-RELATIVE_DATE_LLM_MODEL = 'openai'          # Which LLM to use: 'openai' or 'llama'
+RELATIVE_DATE_LLM_MODEL = 'openai'           # Which LLM to use: 'openai' or 'llama'
 RELATIVE_DATE_OPENAI_MODEL = 'gpt-3.5-turbo' # OpenAI model for relative date extraction (cheaper than gpt-4o)
-RELATIVE_DATE_CONTEXT_WINDOW = 1000         # Maximum context window to send to LLM for date extraction
+RELATIVE_DATE_CONTEXT_WINDOW = 2500         # Maximum context window to send to LLM for date extraction
 
 # --- Data File Paths --- #
 SAMPLE_DATA_PATH = 'data/sample.csv'

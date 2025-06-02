@@ -568,7 +568,7 @@ def extract_relative_dates_llm(text, document_timestamp, config):
         text = text[:max_context]
     
     # Determine which LLM to use
-    llm_model = getattr(config, 'RELATIVE_DATE_LLM_MODEL', 'openai')
+    llm_model = getattr(config, 'RELATIVE_DATE_LLM_MODEL', 'llama')
     
     if llm_model.lower() == 'openai':
         return extract_relative_dates_openai(text, document_timestamp, config)
@@ -631,44 +631,56 @@ def extract_relative_dates_openai(text, document_timestamp, config):
         
         # Construct the prompt
         prompt = f"""
-        Given the document creation date: {timestamp_str}
+You are a medical AI assistant specialized in extracting temporal expressions from clinical notes.
 
-        Analyze the following clinical text and identify phrases that describe dates relative to the document creation date:
-        "{text}"
+TASK: Find ALL relative date expressions in the clinical note below and convert them to absolute dates.
 
-        I need to extract all relative date references like:
-        - "last year" 
-        - "six months ago" 
-        - "yesterday" 
-        - "next week" 
-        - "in 3 days"
-        - "two years ago"
-        - "last month"
+DOCUMENT CREATION DATE: {timestamp_str}
 
-        For each identified phrase:
-        1. Extract the exact phrase text (e.g., "last year", "yesterday")
-        2. Note the start character index of the phrase in the original text
-        3. Calculate the absolute date in YYYY-MM-DD format
+CLINICAL NOTE TEXT:
+"{text}"
 
-        Example 1:
-        Text: "Patient was diagnosed with condition X last year."
-        - Phrase: "last year"
-        - Start index: (position in text)
-        - Calculated date: (one year before document date)
+WHAT TO FIND (Relative Date Expressions):
+- Time ago: "6 months ago", "3 years ago", "last week", "yesterday", "three days prior"
+- Duration references: "3-month history", "over the past 2 weeks", "for the past year", "2-week history"
+- Contextual time: "last Tuesday", "next month", "this past year", "earlier this week"  
+- Prior/before references: "5 years prior", "diagnosed 2 years before", "2 weeks prior to presentation"
+- Future references: "in 6 months", "follow up in 3 weeks", "scheduled next month", "in 1 week"
+- Vague temporal: "recently", "last visit", "previous consultation", "last month"
 
-        Example 2:
-        Text: "Follow-up scheduled in two weeks."
-        - Phrase: "in two weeks"
-        - Start index: (position in text)
-        - Calculated date: (two weeks after document date)
+WHAT NOT TO FIND (Absolute Dates - IGNORE THESE):
+- Specific dates: "2023-08-15", "15/11/2023", "October 3, 2023", "22 Aug 2023"
+- Birth dates: "DOB: 1975-03-15"
+- Any date in YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, or "Month DD, YYYY" format
 
-        Return a JSON array where each object has these keys:
-        "phrase": the exact relative date phrase,
-        "start_index": integer position in text,
-        "calculated_date": YYYY-MM-DD format
+INSTRUCTIONS:
+1. Search the ENTIRE text for phrases that express time RELATIVE to the document date
+2. IGNORE any absolute/specific dates - only find expressions that are relative to "now"
+3. For each relative phrase found, note its EXACT start position in the original text
+4. Calculate the absolute date based on the document creation date
+5. Be thorough - include duration patterns like "3-month history", "over the past X", "in X weeks/months"
 
-        If no relative dates are found, return an empty JSON array [].
-        """
+RETURN FORMAT: JSON array with objects containing:
+- "phrase": exact text of the relative date expression
+- "start_index": character position where phrase starts in the text
+- "calculated_date": absolute date in YYYY-MM-DD format
+
+COMPREHENSIVE EXAMPLES:
+Text: "Patient has 3-month history of symptoms. Surgery was 2 years ago. Follow-up in 6 months. Over the past 2 weeks, symptoms worsened. Last visit was on 2023-06-01."
+Document date: 2023-06-09
+Result:
+[
+  {{"phrase": "3-month history", "start_index": 12, "calculated_date": "2023-03-09"}},
+  {{"phrase": "2 years ago", "start_index": 48, "calculated_date": "2021-06-09"}},
+  {{"phrase": "in 6 months", "start_index": 75, "calculated_date": "2023-12-09"}},
+  {{"phrase": "Over the past 2 weeks", "start_index": 90, "calculated_date": "2023-05-26"}},
+  {{"phrase": "Last visit", "start_index": 124, "calculated_date": "2023-06-01"}}
+]
+Note: "2023-06-01" would NOT be included as it's an absolute date.
+
+If NO relative dates found, return: []
+
+JSON RESULT:"""
         
         if debug_mode:
             print("Sending request to OpenAI API...")
@@ -694,7 +706,10 @@ def extract_relative_dates_openai(text, document_timestamp, config):
         response_text = response.choices[0].message.content.strip()
         if debug_mode:
             print(f"Response text length: {len(response_text)} characters")
-            print(f"First 100 chars of response: {response_text[:100]}...")
+            print(f"Full OpenAI response text:")
+            print("=" * 50)
+            print(response_text)
+            print("=" * 50)
         
         # Find the JSON array in the response
         start_idx = response_text.find('[')
@@ -707,10 +722,8 @@ def extract_relative_dates_openai(text, document_timestamp, config):
             
             try:
                 dates_data = json.loads(json_str)
-                # Only print the count of dates found to reduce verbosity
-                if dates_data:
-                    if debug_mode:
-                        print(f"Successfully parsed JSON with {len(dates_data)} results")
+                if dates_data and debug_mode:
+                    print(f"Successfully parsed JSON with {len(dates_data)} results")
                 
                 # Convert to the expected tuple format
                 relative_dates = []
@@ -721,7 +734,19 @@ def extract_relative_dates_openai(text, document_timestamp, config):
                     
                     # Only add valid entries
                     if phrase and calculated_date:
-                        relative_dates.append((calculated_date, phrase, start_index))
+                        # Filter out phrases that look like absolute dates
+                        import re
+                        absolute_date_patterns = [
+                            r'\b\d{4}-\d{1,2}-\d{1,2}\b',          # YYYY-MM-DD
+                            r'\b\d{1,2}/\d{1,2}/\d{4}\b',          # DD/MM/YYYY or MM/DD/YYYY
+                            r'\b\w+ \d{1,2}, \d{4}\b',             # Month DD, YYYY
+                            r'\b\d{1,2} \w+ \d{4}\b',              # DD Month YYYY
+                        ]
+                        
+                        is_absolute_date = any(re.search(pattern, phrase) for pattern in absolute_date_patterns)
+                        
+                        if not is_absolute_date:
+                            relative_dates.append((calculated_date, phrase, start_index))
                 
                 return relative_dates
             except json.JSONDecodeError as e:
@@ -795,44 +820,54 @@ def extract_relative_dates_llama(text, document_timestamp, config):
         system_prompt = "You are a medical AI assistant specialized in extracting temporal expressions from clinical notes."
         
         user_prompt = f"""
-        Given the document creation date: {timestamp_str}
+TASK: Find ALL relative date expressions in the clinical note below and convert them to absolute dates.
 
-        Analyze the following clinical text and identify phrases that describe dates relative to the document creation date:
-        "{text}"
+DOCUMENT CREATION DATE: {timestamp_str}
 
-        I need to extract all relative date references like:
-        - "last year" 
-        - "six months ago" 
-        - "yesterday" 
-        - "next week" 
-        - "in 3 days"
-        - "two years ago"
-        - "last month"
+CLINICAL NOTE TEXT:
+"{text}"
 
-        For each identified phrase:
-        1. Extract the exact phrase text (e.g., "last year", "yesterday")
-        2. Note the start character index of the phrase in the original text
-        3. Calculate the absolute date in YYYY-MM-DD format
+WHAT TO FIND (Relative Date Expressions):
+- Time ago: "6 months ago", "3 years ago", "last week", "yesterday", "three days prior"
+- Duration references: "3-month history", "over the past 2 weeks", "for the past year", "2-week history"
+- Contextual time: "last Tuesday", "next month", "this past year", "earlier this week"  
+- Prior/before references: "5 years prior", "diagnosed 2 years before", "2 weeks prior to presentation"
+- Future references: "in 6 months", "follow up in 3 weeks", "scheduled next month", "in 1 week"
+- Vague temporal: "recently", "last visit", "previous consultation", "last month"
 
-        Example 1:
-        Text: "Patient was diagnosed with condition X last year."
-        - Phrase: "last year"
-        - Start index: (position in text)
-        - Calculated date: (one year before document date)
+WHAT NOT TO FIND (Absolute Dates - IGNORE THESE):
+- Specific dates: "2023-08-15", "15/11/2023", "October 3, 2023", "22 Aug 2023"
+- Birth dates: "DOB: 1975-03-15"
+- Any date in YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, or "Month DD, YYYY" format
 
-        Example 2:
-        Text: "Follow-up scheduled in two weeks."
-        - Phrase: "in two weeks"
-        - Start index: (position in text)
-        - Calculated date: (two weeks after document date)
+INSTRUCTIONS:
+1. Search the ENTIRE text for phrases that express time RELATIVE to the document date
+2. IGNORE any absolute/specific dates - only find expressions that are relative to "now"
+3. For each relative phrase found, note its EXACT start position in the original text
+4. Calculate the absolute date based on the document creation date
+5. Be thorough - include duration patterns like "3-month history", "over the past X", "in X weeks/months"
 
-        Return a JSON array where each object has these keys:
-        "phrase": the exact relative date phrase,
-        "start_index": integer position in text,
-        "calculated_date": YYYY-MM-DD format
+RETURN FORMAT: JSON array with objects containing:
+- "phrase": exact text of the relative date expression
+- "start_index": character position where phrase starts in the text
+- "calculated_date": absolute date in YYYY-MM-DD format
 
-        If no relative dates are found, return an empty JSON array [].
-        """
+COMPREHENSIVE EXAMPLES:
+Text: "Patient has 3-month history of symptoms. Surgery was 2 years ago. Follow-up in 6 months. Over the past 2 weeks, symptoms worsened. Last visit was on 2023-06-01."
+Document date: 2023-06-09
+Result:
+[
+  {{"phrase": "3-month history", "start_index": 12, "calculated_date": "2023-03-09"}},
+  {{"phrase": "2 years ago", "start_index": 48, "calculated_date": "2021-06-09"}},
+  {{"phrase": "in 6 months", "start_index": 75, "calculated_date": "2023-12-09"}},
+  {{"phrase": "Over the past 2 weeks", "start_index": 90, "calculated_date": "2023-05-26"}},
+  {{"phrase": "Last visit", "start_index": 124, "calculated_date": "2023-06-01"}}
+]
+Note: "2023-06-01" would NOT be included as it's an absolute date.
+
+If NO relative dates found, return: []
+
+JSON RESULT:"""
         
         messages = [
             {"role": "system", "content": system_prompt},
@@ -882,7 +917,19 @@ def extract_relative_dates_llama(text, document_timestamp, config):
                     
                     # Only add valid entries
                     if phrase and calculated_date:
-                        relative_dates.append((calculated_date, phrase, start_index))
+                        # Filter out phrases that look like absolute dates
+                        import re
+                        absolute_date_patterns = [
+                            r'\b\d{4}-\d{1,2}-\d{1,2}\b',          # YYYY-MM-DD
+                            r'\b\d{1,2}/\d{1,2}/\d{4}\b',          # DD/MM/YYYY or MM/DD/YYYY
+                            r'\b\w+ \d{1,2}, \d{4}\b',             # Month DD, YYYY
+                            r'\b\d{1,2} \w+ \d{4}\b',              # DD Month YYYY
+                        ]
+                        
+                        is_absolute_date = any(re.search(pattern, phrase) for pattern in absolute_date_patterns)
+                        
+                        if not is_absolute_date:
+                            relative_dates.append((calculated_date, phrase, start_index))
                 
                 return relative_dates
             except json.JSONDecodeError as e:
