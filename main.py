@@ -276,7 +276,8 @@ def evaluate_on_dataset():
         gold_standard,
         extractor.name,
         EXPERIMENT_OUTPUT_DIR,
-        len(prepared_test_data)
+        len(prepared_test_data),
+        dataset_path
     )
     
     # Only save predictions to CSV
@@ -437,7 +438,8 @@ def compare_all_methods():
                 gold_standard,
                 extractor.name,
                 EXPERIMENT_OUTPUT_DIR,
-                len(prepared_test_data)
+                len(prepared_test_data),
+                dataset_path
             )
             all_method_metrics[extractor.name] = metrics
             

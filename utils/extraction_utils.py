@@ -360,7 +360,7 @@ def run_extraction(extractor, prepared_test_data):
     print(f"Generated {len(all_predictions)} predictions. Skipped {skipped_rels} potentially invalid relationships.")
     return all_predictions
 
-def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name, output_dir, total_notes_processed):
+def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name, output_dir, total_notes_processed, dataset_path=None):
     """
     Compares predictions with gold standard, calculates metrics, prints results,
     and saves a confusion matrix plot.
@@ -373,6 +373,7 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
         extractor_name (str): Name of the extractor being evaluated.
         output_dir (str): Directory to save evaluation outputs.
         total_notes_processed (int): The total number of notes processed by the extractor.
+        dataset_path (str, optional): Path to the dataset for display in the plot title.
 
     Returns:
         dict: A dictionary containing calculated metrics.
@@ -445,12 +446,40 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
     # --- Plotting ---
     # Plotting confusion matrix based on these filtered values
     conf_matrix_values = [true_negatives, false_positives, false_negatives, true_positives]
-    plt.figure(figsize=(6, 5))
+    plt.figure(figsize=(8, 6))
     tn, fp, fn, tp = conf_matrix_values
     conf_matrix_display_array = np.array([[tn, fp], [fn, tp]])
-    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix_display_array, display_labels=['No Relation (in labeled)', 'Has Relation (in labeled)'])
-    disp.plot(cmap=plt.cm.Blues, values_format='d')
-    plt.title(f"Confusion Matrix - {extractor_name} (Labeled Subset)")
+    
+    # Create clearer labels
+    display_labels = ['No Relation', 'Has Relation']
+    
+    # Create the confusion matrix display without automatic text
+    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix_display_array, display_labels=display_labels)
+    ax = disp.plot(cmap=plt.cm.Blues, values_format='', text_kw={'alpha': 0})  # Hide automatic text
+    
+    # Add custom annotations to make TP/TN/FP/FN clear
+    ax = plt.gca()
+    
+    # Add our own text annotations for each quadrant
+    ax.text(0, 0, f'TN\n{tn}', ha='center', va='center', fontsize=11, color='white' if tn > 20 else 'black')
+    ax.text(1, 0, f'FP\n{fp}', ha='center', va='center', fontsize=11, color='white' if fp > 20 else 'black')
+    ax.text(0, 1, f'FN\n{fn}', ha='center', va='center', fontsize=11, color='white' if fn > 20 else 'black')
+    ax.text(1, 1, f'TP\n{tp}', ha='center', va='center', fontsize=11, color='white' if tp > 20 else 'black')
+    
+    # Set axis labels
+    ax.set_ylabel('Actual', fontsize=12)
+    ax.set_xlabel('Predicted', fontsize=12)
+    
+    # Get dataset name from path for display
+    dataset_name = "Unknown"
+    if dataset_path:
+        dataset_name = os.path.basename(dataset_path)
+    
+    # Title with metrics and dataset info
+    plt.title(f"Confusion Matrix - {extractor_name}\nPrec: {precision:.3f} | Rec: {recall:.3f} | F1: {f1:.3f} | Acc: {accuracy:.3f}\nDataset: {dataset_name}", 
+             fontsize=12, pad=20)
+    
+    # Adjust layout
     plt.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
