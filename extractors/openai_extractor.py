@@ -24,6 +24,26 @@ class OpenAIExtractor(BaseRelationExtractor):
         self.name = f"OpenAI ({self.model_name})"
         self.client = None
         
+        # Define category mappings
+        self.category_mapping = {
+            # SNOMED mappings
+            "disorder": "diagnosis",
+            "finding": "symptom",
+            "procedure": "procedure",
+            "product": "medication",
+            
+            # UMLS mappings
+            "sign or symptom": "symptom",
+            "finding": "symptom",
+            "diagnostic procedure": "procedure",
+            "therapeutic or preventive procedure": "procedure",
+            "disease or syndrome": "diagnosis",
+            "pharmacologic substance": "medication",
+            
+            # Default fallbacks
+            "unknown": "symptom"
+        }
+        
     def load(self):
         """
         Load environment variables (including API key) and set up the OpenAI API client.
@@ -56,6 +76,19 @@ class OpenAIExtractor(BaseRelationExtractor):
             print(f"Error setting up OpenAI client: {e}")
             return False
     
+    def _map_category(self, category):
+        """
+        Map old category names to new simplified categories.
+        
+        Args:
+            category (str): Original category name (lowercase).
+            
+        Returns:
+            str: Mapped category name (diagnosis, symptom, procedure, or medication).
+        """
+        category = category.lower()
+        return self.category_mapping.get(category, "symptom")
+    
     def extract(self, text, entities=None):
         """
         Extract relationships using OpenAI's API.
@@ -68,7 +101,7 @@ class OpenAIExtractor(BaseRelationExtractor):
             list: A list of dictionaries, each representing a relationship:
                 {
                     'entity_label': str,     # The entity text
-                    'entity_category': str,  # The entity category
+                    'entity_category': str,  # The entity category (diagnosis, symptom, procedure, medication)
                     'date': str,             # The date text
                     'confidence': float      # Model prediction confidence
                 }
@@ -89,16 +122,22 @@ class OpenAIExtractor(BaseRelationExtractor):
         for entity in entities_list:
             if isinstance(entity, dict):
                 # New format: dict with label, start, category, etc.
+                original_category = entity.get('category', 'unknown')
+                if isinstance(original_category, list) and len(original_category) > 0:
+                    original_category = original_category[0]
+                
+                mapped_category = self._map_category(original_category)
+                
                 entities_info.append({
                     "entity_label": entity.get('label', ''),
-                    "entity_category": entity.get('category', 'unknown'),
+                    "entity_category": mapped_category,
                     "position": entity.get('start', 0)
                 })
             else:
                 # Legacy format: tuple of (label, position)
                 entities_info.append({
                     "entity_label": entity[0],
-                    "entity_category": "disorder",  # Default category
+                    "entity_category": "diagnosis",  # Default to diagnosis instead of disorder
                     "position": entity[1]
                 })
         
@@ -114,10 +153,16 @@ class OpenAIExtractor(BaseRelationExtractor):
 
         For each entity listed in 'Entities Info', identify the single most relevant date from the 'Dates Info' list based on the context in the 'Clinical Note'. 
 
+        The entity categories have been simplified to one of four categories:
+        - diagnosis: medical conditions, diseases, disorders
+        - symptom: signs, symptoms, findings, complaints
+        - procedure: diagnostic tests, surgeries, therapeutic procedures
+        - medication: drugs, medications, pharmacologic substances
+
         Return ONLY a JSON array where each object represents a likely relationship and has the following structure:
         {{
             "entity_label": "name of entity from the Entities Info list",
-            "entity_category": "category of the entity from the Entities Info list",
+            "entity_category": "category of the entity (diagnosis, symptom, procedure, or medication)",
             "date": "the parsed date (from parsed_date field) associated with the entity in YYYY-MM-DD format",
             "confidence": a number between 0 and 1 indicating your confidence in this association
         }}

@@ -53,9 +53,11 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
         config: Configuration object containing paths and column names.
         
     Returns:
-        tuple: (prepared_test_data, gold_standard) or (None, None) if loading fails.
+        tuple: (prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold) or (None, None, None, None) if loading fails.
                prepared_test_data is a list of dicts {'patient_id': ..., 'note_id': ..., 'note': ..., 'entities': ...}.
-               gold_standard is a list of dicts {'note_id': ..., 'patient_id': ..., 'entity_label': ..., 'entity_category': ..., 'date': ...}.
+               entity_gold is a list of dicts {'note_id': ..., 'entity_label': ..., 'entity_category': ..., 'start': ..., 'end': ...}.
+               relationship_gold is a list of dicts {'note_id': ..., 'patient_id': ..., 'entity_label': ..., 'entity_category': ..., 'date': ...}.
+               pa_likelihood_gold is a dict mapping patient_id to likelihood value.
     """
     # If config is provided, use it to get the correct dataset path (ignore the passed dataset_path)
     if config:
@@ -63,7 +65,12 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     
     text_column = config.REAL_DATA_TEXT_COLUMN
     patient_id_column = getattr(config, 'REAL_DATA_PATIENT_ID_COLUMN', None)
-    gold_column = getattr(config, 'REAL_DATA_GOLD_COLUMN', None)
+    
+    # Get column names for gold standards
+    entity_gold_col = getattr(config, 'ENTITY_GOLD_COLUMN', None)
+    relationship_gold_col = getattr(config, 'RELATIONSHIP_GOLD_COLUMN', None)
+    pa_likelihood_gold_col = getattr(config, 'PA_LIKELIHOOD_GOLD_COLUMN', None)
+    legacy_gold_col = getattr(config, 'REAL_DATA_GOLD_COLUMN', None)
     
     # Get column names for annotations if they exist in config
     snomed_column = getattr(config, 'REAL_DATA_SNOMED_COLUMN', None)
@@ -73,7 +80,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     
     if not os.path.exists(dataset_path):
         print(f"Error: Dataset not found at {dataset_path}")
-        return None, None
+        return None, None, None, None
     
     print(f"Loading dataset from {dataset_path}...")
     try:
@@ -83,7 +90,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
         # Check if the text column exists
         if text_column not in df.columns:
             print(f"Error: Text column '{text_column}' not found in CSV. Available columns: {list(df.columns)}")
-            return None, None
+            return None, None, None, None
             
         print(f"Found {len(df)} records in CSV.")
         
@@ -106,18 +113,82 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
             
     except Exception as e:
         print(f"Error loading CSV: {e}")
-        return None, None
+        return None, None, None, None
     
-    # Prepare gold standard list if gold_column exists
-    gold_standard = []
+    # Initialize gold standard lists and dict
+    entity_gold = []
+    relationship_gold = []
+    pa_likelihood_gold = {}
     
-    if gold_column and gold_column in df.columns:
-        print("Found gold standard column. Processing gold standard data...")
+    # --- 1. Process Entity Gold Standard ---
+    if entity_gold_col and entity_gold_col in df.columns:
+        print("Found entity gold standard column. Processing entity gold data...")
         
-        with tqdm(total=len(df), desc="Preparing gold standard", unit="note") as pbar:
+        with tqdm(total=len(df), desc="Preparing entity gold standard", unit="note") as pbar:
             for i, row in df.iterrows():
                 # Check if the gold standard cell is not empty
-                gold_data = row.get(gold_column)
+                gold_data = row.get(entity_gold_col)
+                if pd.notna(gold_data) and gold_data:
+                    try:
+                        # Parse the JSON string in the gold standard column
+                        gold_json = json.loads(gold_data)
+                        
+                        # Process each entity in the gold standard
+                        for entity in gold_json:
+                            entity_gold.append({
+                                'note_id': i,
+                                'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                                'entity_label': str(entity.get('entity_label', '')).lower(),
+                                'entity_category': str(entity.get('entity_category', 'unknown')).lower(),
+                                'start': entity.get('start', 0),
+                                'end': entity.get('end', 0)
+                            })
+                    except (json.JSONDecodeError, TypeError, KeyError) as e:
+                        print(f"Warning: Could not parse entity gold standard for row {i}: {e}")
+                
+                pbar.update(1)
+        
+        print(f"Prepared entity gold standard with {len(entity_gold)} entities.")
+    else:
+        print("No entity gold standard column found or specified.")
+    
+    # --- 2. Process Relationship Gold Standard ---
+    if relationship_gold_col and relationship_gold_col in df.columns:
+        print("Found relationship gold standard column. Processing relationship gold data...")
+        
+        with tqdm(total=len(df), desc="Preparing relationship gold standard", unit="note") as pbar:
+            for i, row in df.iterrows():
+                # Check if the gold standard cell is not empty
+                gold_data = row.get(relationship_gold_col)
+                if pd.notna(gold_data) and gold_data:
+                    try:
+                        # Parse the JSON string in the gold standard column
+                        gold_json = json.loads(gold_data)
+                        
+                        # New format: expects a list of relationship objects
+                        for rel in gold_json:
+                            if 'entity_label' in rel and 'entity_category' in rel and 'date' in rel:
+                                relationship_gold.append({
+                                    'note_id': i,
+                                    'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                                    'entity_label': str(rel['entity_label']).lower(),
+                                    'entity_category': str(rel['entity_category']).lower(),
+                                    'date': rel['date']
+                                })
+                    except (json.JSONDecodeError, TypeError, KeyError) as e:
+                        print(f"Warning: Could not parse relationship gold standard for row {i}: {e}")
+                
+                pbar.update(1)
+        
+        print(f"Prepared relationship gold standard with {len(relationship_gold)} relationships.")
+    # Legacy support for old gold_standard column
+    elif legacy_gold_col and legacy_gold_col in df.columns:
+        print("Found legacy gold standard column. Processing as relationship gold data...")
+        
+        with tqdm(total=len(df), desc="Preparing legacy gold standard", unit="note") as pbar:
+            for i, row in df.iterrows():
+                # Check if the gold standard cell is not empty
+                gold_data = row.get(legacy_gold_col)
                 if pd.notna(gold_data) and gold_data:
                     try:
                         # Parse the JSON string in the gold standard column
@@ -127,11 +198,20 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                         if isinstance(gold_json, list):
                             for rel in gold_json:
                                 if 'entity_label' in rel and 'entity_category' in rel and 'date' in rel:
-                                    gold_standard.append({
+                                    relationship_gold.append({
                                         'note_id': i,
                                         'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                         'entity_label': str(rel['entity_label']).lower(),
                                         'entity_category': str(rel['entity_category']).lower(),
+                                        'date': rel['date']
+                                    })
+                                # Legacy format support
+                                elif 'diagnosis' in rel and 'date' in rel:
+                                    relationship_gold.append({
+                                        'note_id': i,
+                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                                        'entity_label': str(rel['diagnosis']).lower(),
+                                        'entity_category': 'disorder',  # Default category for legacy data
                                         'date': rel['date']
                                     })
                         # Legacy format support for diagnoses
@@ -146,7 +226,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                                 diagnoses = entry.get('diagnoses', [])
                                 for diag in diagnoses:
                                     if 'diagnosis' in diag:
-                                        gold_standard.append({
+                                        relationship_gold.append({
                                             'note_id': i,
                                             'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                             'entity_label': str(diag['diagnosis']).lower(),
@@ -157,7 +237,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                         elif 'relationships' in gold_json and isinstance(gold_json['relationships'], list):
                             for rel in gold_json['relationships']:
                                 if 'diagnosis' in rel and 'date' in rel:
-                                    gold_standard.append({
+                                    relationship_gold.append({
                                         'note_id': i,
                                         'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                         'entity_label': str(rel['diagnosis']).lower(),
@@ -171,9 +251,27 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                 
                 pbar.update(1)
         
-        print(f"Prepared gold standard with {len(gold_standard)} relationships.")
+        print(f"Prepared relationship gold standard with {len(relationship_gold)} relationships.")
     else:
-        print("No gold standard column found or specified. Evaluation metrics will not be calculated.")
+        print("No relationship gold standard column found or specified.")
+    
+    # --- 3. Process PA Likelihood Gold Standard ---
+    if pa_likelihood_gold_col and pa_likelihood_gold_col in df.columns:
+        print("Found PA likelihood gold standard column. Processing likelihood data...")
+        
+        for i, row in df.iterrows():
+            patient_id = row.get(patient_id_column)
+            likelihood = row.get(pa_likelihood_gold_col)
+            
+            if pd.notna(likelihood) and patient_id is not None:
+                try:
+                    pa_likelihood_gold[patient_id] = float(likelihood)
+                except (ValueError, TypeError) as e:
+                    print(f"Warning: Could not convert PA likelihood value '{likelihood}' to float for patient {patient_id}: {e}")
+        
+        print(f"Prepared PA likelihood gold standard for {len(pa_likelihood_gold)} patients.")
+    else:
+        print("No PA likelihood gold standard column found or specified.")
     
     # Pre-extract entities from the text column
     print("Pre-extracting entities...")
@@ -318,7 +416,8 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                 'patient_id': row.get(patient_id_column) if patient_id_column else None,
                 'note_id': i,
                 'note': text,
-                'entities': entities  # Pass the new unified entity structure
+                'entities': entities,  # Pass the new unified entity structure
+                'extracted_entities': all_entities_list  # Keep the extracted entities for NER evaluation
             })
             
             pbar.update(1)
@@ -328,7 +427,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
         print(f"Saving CSV with LLM extracted dates to {dataset_path}")
         df.to_csv(dataset_path, index=False)
     
-    return prepared_test_data, gold_standard
+    return prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold
 
 # Helper function to run extraction process for a given extractor and data
 def run_extraction(extractor, prepared_test_data):
@@ -1143,3 +1242,374 @@ def generate_patient_timeline_summary(patient_timelines, output_dir, extractor_n
                 f.write(f"Patient {patient_id}: No entities\n")
     
     print(f"Generated patient timeline summary: {summary_path}")
+
+def calculate_entity_metrics(prepared_test_data, entity_gold, output_dir):
+    """
+    Evaluates the entity extraction (NER) performance by comparing extracted entities with gold standard.
+    
+    Args:
+        prepared_test_data (list): List of dicts containing extracted entities.
+        entity_gold (list): List of gold standard entities.
+        output_dir (str): Directory to save evaluation outputs.
+        
+    Returns:
+        dict: A dictionary containing calculated metrics.
+    """
+    print("\n--- Evaluating Entity Extraction (NER) ---")
+    if not entity_gold:
+        print("No entity_gold data provided. Skipping NER evaluation.")
+        return {'precision': 0, 'recall': 0, 'f1': 0}
+
+    # Create sets for comparison
+    # Using (note_id, entity_label, entity_category, start, end) as the key for strict matching
+    gold_entities_set = set(
+        (g['note_id'], g['entity_label'], g['entity_category'], g['start'], g['end'])
+        for g in entity_gold
+    )
+
+    # Extract predicted entities from prepared_test_data
+    predicted_entities_set = set()
+    for note_data in prepared_test_data:
+        note_id = note_data['note_id']
+        for entity in note_data['extracted_entities']:
+            predicted_entities_set.add(
+                (note_id, entity['label'], entity['category'], entity['start'], entity['end'])
+            )
+
+    # Calculate metrics
+    true_positives = len(predicted_entities_set & gold_entities_set)
+    false_positives = len(predicted_entities_set - gold_entities_set)
+    false_negatives = len(gold_entities_set - predicted_entities_set)
+
+    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+
+    print(f"  Entity Evaluation Results:")
+    print(f"  Total unique gold entities:     {len(gold_entities_set)}")
+    print(f"  Total unique predicted entities: {len(predicted_entities_set)}")
+    print(f"  True Positives:  {true_positives}")
+    print(f"  False Positives: {false_positives}")
+    print(f"  False Negatives: {false_negatives}")
+    print(f"  Precision: {precision:.3f}")
+    print(f"  Recall:    {recall:.3f}")
+    print(f"  F1 Score:  {f1:.3f}")
+    
+    # Plot confusion matrix
+    try:
+        plt.figure(figsize=(8, 6))
+        conf_matrix_display_array = np.array([[0, false_positives], [false_negatives, true_positives]])
+        
+        # Create clearer labels
+        display_labels = ['No Entity', 'Entity']
+        
+        # Create the confusion matrix display without automatic text
+        disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix_display_array, display_labels=display_labels)
+        ax = disp.plot(cmap=plt.cm.Blues, values_format='', text_kw={'alpha': 0})
+        
+        # Add our own text annotations for each quadrant
+        ax.text(0, 0, f'TN\n-', ha='center', va='center', fontsize=11)
+        ax.text(1, 0, f'FP\n{false_positives}', ha='center', va='center', fontsize=11, color='white' if false_positives > 20 else 'black')
+        ax.text(0, 1, f'FN\n{false_negatives}', ha='center', va='center', fontsize=11, color='white' if false_negatives > 20 else 'black')
+        ax.text(1, 1, f'TP\n{true_positives}', ha='center', va='center', fontsize=11, color='white' if true_positives > 20 else 'black')
+        
+        # Set axis labels
+        ax.set_ylabel('Actual', fontsize=12)
+        ax.set_xlabel('Predicted', fontsize=12)
+        
+        # Title with metrics
+        plt.title(f"Entity Extraction Confusion Matrix\nPrec: {precision:.3f} | Rec: {recall:.3f} | F1: {f1:.3f}", 
+                fontsize=12, pad=20)
+        
+        # Adjust layout
+        plt.tight_layout()
+
+        os.makedirs(output_dir, exist_ok=True)
+        plot_filename = os.path.join(output_dir, "entity_extraction_confusion_matrix.png")
+        plt.savefig(plot_filename)
+        print(f"  Entity confusion matrix saved to {plot_filename}")
+        plt.close()
+    except Exception as e:
+        print(f"  Error saving entity confusion matrix: {e}")
+
+    return {'precision': precision, 'recall': recall, 'f1': f1}
+
+def calculate_relationship_metrics(all_predictions, relationship_gold, extractor_name, output_dir, total_notes_processed, dataset_path=None):
+    """
+    Compares relationship predictions with gold standard, calculates metrics, prints results,
+    and saves a confusion matrix plot.
+    
+    Args:
+        all_predictions (list): List of predicted relationships (normalized by the caller).
+                                Each dict must contain 'note_id', 'entity_label', 'entity_category', 'date' (YYYY-MM-DD).
+        relationship_gold (list): List of gold standard relationships (normalized).
+                              Each dict must contain 'note_id', 'entity_label', 'entity_category', 'date' (YYYY-MM-DD).
+        extractor_name (str): Name of the extractor being evaluated.
+        output_dir (str): Directory to save evaluation outputs.
+        total_notes_processed (int): The total number of notes processed by the extractor.
+        dataset_path (str, optional): Path to the dataset for display in the plot title.
+
+    Returns:
+        dict: A dictionary containing calculated metrics.
+    """
+    print(f"\n--- Evaluating Relationship Extraction (RE) for {extractor_name} ---")
+    if not relationship_gold:
+        print(f"  No relationship_gold data provided for {extractor_name} (processed {total_notes_processed} notes). Skipping metric calculation.")
+        # Return zeroed metrics if no gold standard
+        return {
+            'precision': 0, 'recall': 0, 'f1': 0, 'accuracy': 0,
+            'true_positives': 0, 'false_positives': 0, 'false_negatives': 0
+        }
+
+    # Identify the notes that have gold standard labels
+    gold_note_ids = set(g['note_id'] for g in relationship_gold)
+    num_labeled_notes = len(gold_note_ids)
+
+    if num_labeled_notes == 0:
+        print(f"  No notes with gold standard labels found for {extractor_name} (processed {total_notes_processed} notes). Skipping metric calculation.")
+        return {
+            'precision': 0, 'recall': 0, 'f1': 0, 'accuracy': 0,
+            'true_positives': 0, 'false_positives': 0, 'false_negatives': 0
+        }
+    
+    print(f"  Evaluating metrics for {extractor_name} based on {num_labeled_notes} notes with gold standard labels (out of {total_notes_processed} notes processed).")
+
+    # Filter predictions to include only those from labeled notes
+    filtered_predictions = [p for p in all_predictions if p['note_id'] in gold_note_ids]
+    
+    # Handle legacy format predictions (with 'diagnosis' instead of 'entity_label')
+    for pred in filtered_predictions:
+        if 'diagnosis' in pred and 'entity_label' not in pred:
+            pred['entity_label'] = pred['diagnosis']
+            pred['entity_category'] = 'disorder'  # Default category for legacy format
+    
+    if not filtered_predictions:
+        print(f"  No predictions found for the {num_labeled_notes} labeled notes by {extractor_name}.")
+        # If no predictions for labeled notes, TP and FP are 0. FN is total gold.
+        true_positives = 0
+        false_positives = 0
+        false_negatives = len(relationship_gold) # All gold items were missed
+        pred_set = set()  # Empty set for reporting
+        gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
+    else:
+        # Convert filtered predictions and gold standard to sets for comparison
+        pred_set = set((p['note_id'], p['entity_label'], p['entity_category'], p['date']) for p in filtered_predictions)
+        gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
+
+        # Calculate TP, FP, FN based on filtered predictions
+        true_positives = len(pred_set & gold_set)
+        false_positives = len(pred_set - gold_set)
+        false_negatives = len(gold_set - pred_set)
+    
+    true_negatives = 0 # TN is ill-defined/hard to calculate accurately here
+
+    # Calculate metrics
+    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    
+    # Calculate accuracy: (TP + TN) / (TP + TN + FP + FN)
+    # Note: TN is set to 0 since it's ill-defined for this task, so accuracy = TP / (TP + FP + FN)
+    accuracy = true_positives / (true_positives + false_positives + false_negatives) if (true_positives + false_positives + false_negatives) > 0 else 0
+
+    # --- Reporting ---
+    print(f"  Relationship Evaluation Results for {extractor_name} (on labeled subset):")
+    print(f"    Total unique predictions for labeled notes: {len(pred_set)}")    # TP + FP for labeled notes
+    print(f"    Total unique gold relationships:           {len(gold_set)}")   # TP + FN for labeled notes
+    print(f"    True Positives:  {true_positives}")
+    print(f"    False Positives: {false_positives}")
+    print(f"    False Negatives: {false_negatives}")
+    print(f"    Precision: {precision:.3f}")
+    print(f"    Recall:    {recall:.3f}")
+    print(f"    F1 Score:  {f1:.3f}")
+    print(f"    Accuracy:  {accuracy:.3f}")
+
+    # --- Plotting ---
+    # Plotting confusion matrix based on these filtered values
+    conf_matrix_values = [true_negatives, false_positives, false_negatives, true_positives]
+    plt.figure(figsize=(8, 6))
+    tn, fp, fn, tp = conf_matrix_values
+    conf_matrix_display_array = np.array([[tn, fp], [fn, tp]])
+    
+    # Create clearer labels
+    display_labels = ['No Relation', 'Has Relation']
+    
+    # Create the confusion matrix display without automatic text
+    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix_display_array, display_labels=display_labels)
+    ax = disp.plot(cmap=plt.cm.Blues, values_format='', text_kw={'alpha': 0})  # Hide automatic text
+    
+    # Add custom annotations to make TP/TN/FP/FN clear
+    ax = plt.gca()
+    
+    # Add our own text annotations for each quadrant
+    ax.text(0, 0, f'TN\n{tn}', ha='center', va='center', fontsize=11, color='white' if tn > 20 else 'black')
+    ax.text(1, 0, f'FP\n{fp}', ha='center', va='center', fontsize=11, color='white' if fp > 20 else 'black')
+    ax.text(0, 1, f'FN\n{fn}', ha='center', va='center', fontsize=11, color='white' if fn > 20 else 'black')
+    ax.text(1, 1, f'TP\n{tp}', ha='center', va='center', fontsize=11, color='white' if tp > 20 else 'black')
+    
+    # Set axis labels
+    ax.set_ylabel('Actual', fontsize=12)
+    ax.set_xlabel('Predicted', fontsize=12)
+    
+    # Get dataset name from path for display
+    dataset_name = "Unknown"
+    if dataset_path:
+        dataset_name = os.path.basename(dataset_path)
+    
+    # Title with metrics and dataset info
+    plt.title(f"Relationship Confusion Matrix - {extractor_name}\nPrec: {precision:.3f} | Rec: {recall:.3f} | F1: {f1:.3f} | Acc: {accuracy:.3f}\nDataset: {dataset_name}", 
+             fontsize=12, pad=20)
+    
+    # Adjust layout
+    plt.tight_layout()
+
+    os.makedirs(output_dir, exist_ok=True)
+    safe_extractor_name = re.sub(r'[^\w.-]+', '_', extractor_name).lower()
+    plot_filename = f"{safe_extractor_name}_relationship_confusion_matrix.png"
+    plot_save_path = os.path.join(output_dir, plot_filename)
+    try:
+        plt.savefig(plot_save_path)
+        print(f"    Relationship confusion matrix saved to {plot_save_path}")
+    except Exception as e:
+        print(f"    Error saving relationship confusion matrix: {e}")
+    plt.close()
+
+    # Return calculated metrics
+    metrics_dict = {
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'accuracy': accuracy,
+        'true_positives': true_positives,
+        'false_positives': false_positives,
+        'false_negatives': false_negatives,
+    }
+    return metrics_dict
+
+def predict_pa_likelihood(patient_timelines):
+    """
+    Predict the likelihood of pituitary adenoma for each patient based on their timeline.
+    
+    This is a simple rule-based implementation. In a real-world scenario, you would use a
+    more sophisticated model trained on labeled data.
+    
+    Args:
+        patient_timelines (dict): Dictionary mapping patient_id to a list of entity-date relationships.
+        
+    Returns:
+        dict: Dictionary mapping patient_id to likelihood score (0-1).
+    """
+    print("\n--- Predicting Pituitary Adenoma Likelihood ---")
+    predictions = {}
+    
+    for patient_id, timeline in patient_timelines.items():
+        # Simple rule-based approach:
+        # 1. Check if pituitary_adenoma is mentioned
+        pa_mentions = [entry for entry in timeline if entry['entity_label'] == 'pituitary_adenoma']
+        
+        # 2. Check for related symptoms (headache, vision problems)
+        related_symptoms = [entry for entry in timeline if entry['entity_label'] in 
+                           ['headache', 'vision', 'visual', 'nausea', 'vomiting']]
+        
+        # 3. Check for related procedures (MRI, CT scan)
+        related_procedures = [entry for entry in timeline if entry['entity_label'] in 
+                             ['mri', 'ct', 'scan', 'imaging']]
+        
+        # Calculate likelihood based on these factors
+        likelihood = 0.0
+        
+        # If pituitary_adenoma is explicitly mentioned, start with high likelihood
+        if pa_mentions:
+            likelihood = 0.8
+            # Increase if mentioned multiple times
+            if len(pa_mentions) > 1:
+                likelihood += min(0.1, 0.02 * len(pa_mentions))
+        
+        # If related symptoms are present, add to likelihood
+        if related_symptoms:
+            likelihood += min(0.3, 0.05 * len(related_symptoms))
+        
+        # If related procedures are present, add to likelihood
+        if related_procedures:
+            likelihood += min(0.2, 0.05 * len(related_procedures))
+        
+        # Cap at 1.0
+        likelihood = min(1.0, likelihood)
+        
+        # Store prediction
+        predictions[patient_id] = likelihood
+    
+    print(f"  Generated predictions for {len(predictions)} patients.")
+    return predictions
+
+def calculate_likelihood_metrics(predicted_likelihoods, gold_likelihoods, output_dir):
+    """
+    Evaluate the pituitary adenoma likelihood predictions against gold standard.
+    
+    Args:
+        predicted_likelihoods (dict): Dictionary mapping patient_id to predicted likelihood (0-1).
+        gold_likelihoods (dict): Dictionary mapping patient_id to gold standard likelihood (0-1).
+        output_dir (str): Directory to save evaluation outputs.
+        
+    Returns:
+        dict: Dictionary containing evaluation metrics.
+    """
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+    
+    print("\n--- Evaluating PA Likelihood Prediction ---")
+    if not gold_likelihoods:
+        print("  No PA likelihood gold standard data provided. Skipping evaluation.")
+        return {'mse': 0, 'mae': 0, 'r2': 0}
+    
+    # Get the intersection of patient IDs
+    common_patients = set(predicted_likelihoods.keys()) & set(gold_likelihoods.keys())
+    
+    if not common_patients:
+        print("  No common patients between predictions and gold standard. Skipping evaluation.")
+        return {'mse': 0, 'mae': 0, 'r2': 0}
+    
+    # Extract predictions and gold standard for common patients
+    y_pred = [predicted_likelihoods[pid] for pid in common_patients]
+    y_true = [gold_likelihoods[pid] for pid in common_patients]
+    
+    # Calculate metrics
+    mse = mean_squared_error(y_true, y_pred)
+    mae = mean_absolute_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
+    
+    print(f"  Evaluated on {len(common_patients)} patients.")
+    print(f"  Mean Squared Error (MSE): {mse:.4f}")
+    print(f"  Mean Absolute Error (MAE): {mae:.4f}")
+    print(f"  R² Score: {r2:.4f}")
+    
+    # Plot predictions vs. gold standard
+    try:
+        plt.figure(figsize=(8, 6))
+        plt.scatter(y_true, y_pred, alpha=0.7)
+        plt.plot([0, 1], [0, 1], 'r--')  # Perfect prediction line
+        
+        plt.xlim([0, 1])
+        plt.ylim([0, 1])
+        plt.xlabel('Gold Standard Likelihood')
+        plt.ylabel('Predicted Likelihood')
+        plt.title(f'PA Likelihood Prediction\nMSE: {mse:.4f}, MAE: {mae:.4f}, R²: {r2:.4f}')
+        plt.grid(True, alpha=0.3)
+        
+        # Add patient IDs as annotations
+        for pid, true_val, pred_val in zip(common_patients, y_true, y_pred):
+            plt.annotate(f"Patient {pid}", (true_val, pred_val), 
+                        textcoords="offset points", xytext=(0,10), 
+                        ha='center', fontsize=8)
+        
+        plt.tight_layout()
+        
+        # Save the plot
+        os.makedirs(output_dir, exist_ok=True)
+        plot_path = os.path.join(output_dir, "pa_likelihood_prediction.png")
+        plt.savefig(plot_path)
+        print(f"  PA likelihood prediction plot saved to {plot_path}")
+        plt.close()
+    except Exception as e:
+        print(f"  Error creating PA likelihood plot: {e}")
+    
+    return {'mse': mse, 'mae': mae, 'r2': r2}

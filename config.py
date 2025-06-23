@@ -49,7 +49,12 @@ REAL_DATA_TIMESTAMP_COLUMN = 'document_timestamp'   # Column containing document
 REAL_DATA_SNOMED_COLUMN = 'extracted_snomed_entities'  # Column containing pre-extracted SNOMED entities
 REAL_DATA_UMLS_COLUMN = 'extracted_umls_entities'      # Column containing pre-extracted UMLS entities
 REAL_DATA_DATES_COLUMN = 'formatted_dates'          # Column containing pre-extracted date entities
-REAL_DATA_GOLD_COLUMN = 'gold_standard'     # Column containing gold standard labels (if available)
+REAL_DATA_GOLD_COLUMN = 'relationship_gold'     # Column containing gold standard labels for relationships (if available)
+
+# --- Gold Standard Column Names --- #
+ENTITY_GOLD_COLUMN = 'entity_gold'                  # Gold standard for entities (NER task)
+RELATIONSHIP_GOLD_COLUMN = 'relationship_gold'      # Gold standard for relationships (RE task)
+PA_LIKELIHOOD_GOLD_COLUMN = 'pa_likelihood'         # Gold standard for PA likelihood prediction
 
 # --- Debug Settings --- #
 DEBUG_MODE = False  # Set to True for verbose logging during API calls and data processing

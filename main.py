@@ -18,7 +18,11 @@ from utils.extraction_utils import (
     extract_relative_dates_llm,
     aggregate_predictions_by_patient,
     generate_patient_timelines,
-    generate_patient_timeline_summary
+    generate_patient_timeline_summary,
+    calculate_entity_metrics,
+    calculate_relationship_metrics,
+    predict_pa_likelihood,
+    calculate_likelihood_metrics
 )
 import config
 
@@ -249,7 +253,10 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
 def evaluate_on_dataset():
     """
     Evaluate the configured extraction method on the dataset specified in config.py.
-    Saves predictions and correctness indicators to the original CSV file.
+    Performs three-step evaluation:
+    1. Entity extraction (NER)
+    2. Relationship extraction (RE)
+    3. PA likelihood prediction
     """
     # Use get_data_path to determine the dataset path
     dataset_path = get_data_path(config)
@@ -257,12 +264,16 @@ def evaluate_on_dataset():
     # Use None to use all evaluation samples (the last 20% of dataset)
     num_test_samples = None
 
-    # Load and prepare data using the helper function, passing the config
-    prepared_test_data, gold_standard = load_and_prepare_data(dataset_path, num_test_samples, config)
-    if prepared_test_data is None or gold_standard is None:
+    # --- 1. Load and prepare data using the helper function, passing the config ---
+    prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+    if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting evaluation.")
         return
 
+    # --- 2. Entity Extraction (NER) Evaluation ---
+    entity_metrics = calculate_entity_metrics(prepared_test_data, entity_gold, EXPERIMENT_OUTPUT_DIR)
+
+    # --- 3. Relationship Extraction (RE) Evaluation ---
     # Create and load extractor
     try:
         extractor = create_extractor(config.EXTRACTION_METHOD, config)
@@ -276,19 +287,29 @@ def evaluate_on_dataset():
     # Generate predictions using the helper function
     all_predictions = run_extraction(extractor, prepared_test_data)
 
-    # Calculate and report metrics
-    print("\nCalculating metrics...")
+    # Calculate and report relationship metrics
+    print("\nCalculating relationship metrics...")
     os.makedirs(EXPERIMENT_OUTPUT_DIR, exist_ok=True)
-    metrics_result = calculate_and_report_metrics(
+    relationship_metrics = calculate_relationship_metrics(
         all_predictions,
-        gold_standard,
+        relationship_gold,
         extractor.name,
         EXPERIMENT_OUTPUT_DIR,
         len(prepared_test_data),
         dataset_path
     )
     
-    # Only save predictions to CSV
+    # --- 4. Timeline Generation and PA Likelihood Prediction ---
+    # Aggregate predictions by patient
+    patient_timelines = aggregate_predictions_by_patient(all_predictions)
+    
+    # Predict PA likelihood
+    predicted_likelihoods = predict_pa_likelihood(patient_timelines)
+    
+    # Evaluate likelihood predictions
+    likelihood_metrics = calculate_likelihood_metrics(predicted_likelihoods, pa_likelihood_gold, EXPERIMENT_OUTPUT_DIR)
+    
+    # Save predictions to CSV
     print(f"\nSaving predictions to {dataset_path}...")
     
     try:
@@ -299,6 +320,7 @@ def evaluate_on_dataset():
         safe_extractor_name = extractor.name.lower().replace(' ', '_')
         predictions_column = f"{safe_extractor_name}_predictions"
         correctness_column = f"{safe_extractor_name}_is_correct"
+        pa_likelihood_column = f"{safe_extractor_name}_pa_likelihood"
         
         # Create dictionaries to hold predictions and correctness by note_id
         note_predictions = {}
@@ -317,10 +339,10 @@ def evaluate_on_dataset():
                 'confidence': pred.get('confidence', 1.0)
             })
         
-        # Check correctness if gold standard exists
-        if gold_standard:
+        # Check correctness if relationship gold standard exists
+        if relationship_gold:
             # Convert gold_standard to a set of (note_id, entity_label, entity_category, date) tuples for easier comparison
-            gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in gold_standard)
+            gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
             
             # Check each prediction against the gold standard
             for pred in all_predictions:
@@ -334,8 +356,12 @@ def evaluate_on_dataset():
         
         # Add predictions to dataframe
         df[predictions_column] = None
-        if gold_standard:
+        if relationship_gold:
             df[correctness_column] = None
+            
+        # Add PA likelihood predictions to dataframe
+        if predicted_likelihoods:
+            df[pa_likelihood_column] = None
             
         # Fill in predictions and correctness columns
         for i, row in df.iterrows():
@@ -344,12 +370,19 @@ def evaluate_on_dataset():
                 
                 if i in note_correctness:
                     df.at[i, correctness_column] = json.dumps(note_correctness[i])
+            
+            # Add PA likelihood prediction if available
+            patient_id = row.get(config.REAL_DATA_PATIENT_ID_COLUMN)
+            if patient_id in predicted_likelihoods:
+                df.at[i, pa_likelihood_column] = predicted_likelihoods[patient_id]
         
         # Save the updated dataframe back to CSV
         df.to_csv(dataset_path, index=False)
         print(f"Successfully saved predictions to column '{predictions_column}'")
-        if gold_standard:
+        if relationship_gold:
             print(f"Successfully saved correctness indicators to column '{correctness_column}'")
+        if predicted_likelihoods:
+            print(f"Successfully saved PA likelihood predictions to column '{pa_likelihood_column}'")
             
     except Exception as e:
         print(f"Error saving predictions to CSV: {e}")
@@ -358,9 +391,6 @@ def evaluate_on_dataset():
     if config.GENERATE_PATIENT_TIMELINES:
         print("\nGenerating patient timelines...")
         timeline_output_dir = os.path.join(project_root, config.TIMELINE_OUTPUT_DIR)
-        
-        # Aggregate predictions by patient
-        patient_timelines = aggregate_predictions_by_patient(all_predictions)
         
         # Generate individual timeline files
         generate_patient_timelines(patient_timelines, timeline_output_dir, extractor.name)
@@ -371,12 +401,32 @@ def evaluate_on_dataset():
         # Generate visual timeline plots
         generate_patient_timeline_visualizations(patient_timelines, timeline_output_dir, extractor.name)
     
+    # Print summary of all evaluations
+    print("\n=== EVALUATION SUMMARY ===")
+    print("Entity Extraction (NER):")
+    print(f"  Precision: {entity_metrics['precision']:.3f}")
+    print(f"  Recall:    {entity_metrics['recall']:.3f}")
+    print(f"  F1 Score:  {entity_metrics['f1']:.3f}")
+    
+    print("\nRelationship Extraction (RE):")
+    print(f"  Precision: {relationship_metrics['precision']:.3f}")
+    print(f"  Recall:    {relationship_metrics['recall']:.3f}")
+    print(f"  F1 Score:  {relationship_metrics['f1']:.3f}")
+    
+    print("\nPA Likelihood Prediction:")
+    print(f"  MSE: {likelihood_metrics['mse']:.4f}")
+    print(f"  MAE: {likelihood_metrics['mae']:.4f}")
+    print(f"  R²:  {likelihood_metrics['r2']:.4f}")
+    
     print("\nEvaluation Done!")
 
 def compare_all_methods():
     """
     Compare available extraction methods on the dataset.
-    Saves predictions and correctness indicators from all methods to the original CSV file.
+    Performs three-step evaluation for each method:
+    1. Entity extraction (NER)
+    2. Relationship extraction (RE) 
+    3. PA likelihood prediction
     """
     # Use get_data_path to determine the dataset path
     dataset_path = get_data_path(config)
@@ -396,10 +446,15 @@ def compare_all_methods():
     print(f"Using dataset: {dataset_path}")
 
     # Load and prepare data once using the helper function, passing the config
-    prepared_test_data, gold_standard = load_and_prepare_data(dataset_path, num_test_samples, config)
-    if prepared_test_data is None or gold_standard is None:
+    prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+    if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting comparison.")
         return
+
+    # --- 1. Entity Extraction (NER) Evaluation ---
+    # This only needs to be done once as it's the same for all methods
+    print("\n=== ENTITY EXTRACTION EVALUATION ===")
+    entity_metrics = calculate_entity_metrics(prepared_test_data, entity_gold, EXPERIMENT_OUTPUT_DIR)
 
     # Load extractors
     extractors_to_compare = []
@@ -422,6 +477,7 @@ def compare_all_methods():
     # Evaluate each extractor
     all_method_metrics = {}
     all_method_predictions = {}
+    all_method_pa_likelihoods = {}
     
     # For CSV updates
     original_df = None
@@ -434,31 +490,45 @@ def compare_all_methods():
     
     with tqdm(total=len(extractors_to_compare), desc="Comparing methods", unit="method") as pbar:
         for extractor in extractors_to_compare:
-            print(f"\nEvaluating {extractor.name}...")
+            print(f"\n=== EVALUATING {extractor.name} ===")
             
+            # --- 2. Relationship Extraction (RE) Evaluation ---
             # Generate predictions
             all_predictions = run_extraction(extractor, prepared_test_data)
             all_method_predictions[extractor.name] = all_predictions
             
-            # Calculate metrics
-            print(f"Calculating metrics for {extractor.name}...")
-            metrics = calculate_and_report_metrics(
+            # Calculate relationship metrics
+            print(f"Calculating relationship metrics for {extractor.name}...")
+            relationship_metrics = calculate_relationship_metrics(
                 all_predictions,
-                gold_standard,
+                relationship_gold,
                 extractor.name,
                 EXPERIMENT_OUTPUT_DIR,
                 len(prepared_test_data),
                 dataset_path
             )
-            all_method_metrics[extractor.name] = metrics
+            
+            # --- 3. PA Likelihood Prediction ---
+            # Aggregate predictions by patient
+            patient_timelines = aggregate_predictions_by_patient(all_predictions)
+            
+            # Predict PA likelihood
+            predicted_likelihoods = predict_pa_likelihood(patient_timelines)
+            all_method_pa_likelihoods[extractor.name] = predicted_likelihoods
+            
+            # Evaluate likelihood predictions
+            likelihood_metrics = calculate_likelihood_metrics(predicted_likelihoods, pa_likelihood_gold, EXPERIMENT_OUTPUT_DIR)
+            
+            # Store all metrics
+            all_method_metrics[extractor.name] = {
+                'relationship': relationship_metrics,
+                'likelihood': likelihood_metrics
+            }
             
             # Generate patient timelines if configured
             if config.GENERATE_PATIENT_TIMELINES:
                 print(f"Generating patient timelines for {extractor.name}...")
                 timeline_output_dir = os.path.join(project_root, config.TIMELINE_OUTPUT_DIR)
-                
-                # Aggregate predictions by patient
-                patient_timelines = aggregate_predictions_by_patient(all_predictions)
                 
                 # Generate individual timeline files
                 generate_patient_timelines(patient_timelines, timeline_output_dir, extractor.name)
@@ -474,6 +544,7 @@ def compare_all_methods():
                 safe_extractor_name = extractor.name.lower().replace(' ', '_')
                 predictions_column = f"{safe_extractor_name}_predictions"
                 correctness_column = f"{safe_extractor_name}_is_correct"
+                pa_likelihood_column = f"{safe_extractor_name}_pa_likelihood"
                 
                 # Create dictionaries to hold predictions and correctness by note_id
                 note_predictions = {}
@@ -493,9 +564,9 @@ def compare_all_methods():
                     })
                 
                 # Check correctness if gold standard exists
-                if gold_standard:
+                if relationship_gold:
                     # Convert gold_standard to a set of (note_id, entity_label, entity_category, date) tuples for easier comparison
-                    gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in gold_standard)
+                    gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
                     
                     # Check each prediction against the gold standard
                     for pred in all_predictions:
@@ -509,8 +580,12 @@ def compare_all_methods():
                 
                 # Add predictions to dataframe
                 original_df[predictions_column] = None
-                if gold_standard:
+                if relationship_gold:
                     original_df[correctness_column] = None
+                
+                # Add PA likelihood predictions to dataframe
+                if predicted_likelihoods:
+                    original_df[pa_likelihood_column] = None
                     
                 # Fill in predictions and correctness columns
                 for i, row in original_df.iterrows():
@@ -519,6 +594,11 @@ def compare_all_methods():
                         
                         if i in note_correctness:
                             original_df.at[i, correctness_column] = json.dumps(note_correctness[i])
+                    
+                    # Add PA likelihood prediction if available
+                    patient_id = row.get(config.REAL_DATA_PATIENT_ID_COLUMN)
+                    if patient_id in predicted_likelihoods:
+                        original_df.at[i, pa_likelihood_column] = predicted_likelihoods[patient_id]
                 
                 print(f"Added predictions for {extractor.name} to CSV columns")
             
@@ -532,9 +612,33 @@ def compare_all_methods():
         except Exception as e:
             print(f"Error saving predictions to CSV: {e}")
     
-    # Generate a comparison plot
-    if all_method_metrics:
-        plot_comparison(all_method_metrics)
+    # Print final comparison summary
+    print("\n=== FINAL COMPARISON SUMMARY ===")
+    
+    # Entity metrics (same for all methods)
+    print("\nEntity Extraction (NER) Metrics:")
+    print(f"  Precision: {entity_metrics['precision']:.3f}")
+    print(f"  Recall:    {entity_metrics['recall']:.3f}")
+    print(f"  F1 Score:  {entity_metrics['f1']:.3f}")
+    
+    # Relationship metrics comparison
+    print("\nRelationship Extraction (RE) Metrics:")
+    print(f"{'Method':<20} {'Precision':<10} {'Recall':<10} {'F1 Score':<10}")
+    print("-" * 50)
+    for method_name, metrics in all_method_metrics.items():
+        rel_metrics = metrics['relationship']
+        print(f"{method_name:<20} {rel_metrics['precision']:.3f}{'':>5} {rel_metrics['recall']:.3f}{'':>5} {rel_metrics['f1']:.3f}{'':>5}")
+    
+    # PA likelihood metrics comparison
+    print("\nPA Likelihood Prediction Metrics:")
+    print(f"{'Method':<20} {'MSE':<10} {'MAE':<10} {'R²':<10}")
+    print("-" * 50)
+    for method_name, metrics in all_method_metrics.items():
+        pa_metrics = metrics['likelihood']
+        print(f"{method_name:<20} {pa_metrics['mse']:.4f}{'':>5} {pa_metrics['mae']:.4f}{'':>5} {pa_metrics['r2']:.4f}{'':>5}")
+    
+    # Generate comparison plots
+    plot_comparison(all_method_metrics)
 
     print("\nComparison completed!")
 
@@ -549,35 +653,91 @@ def plot_comparison(method_metrics):
         method_metrics (dict): Dictionary mapping extractor names to their metrics.
     """
     os.makedirs(EXPERIMENT_OUTPUT_DIR, exist_ok=True)
-    print("\nGenerating comparison plot...")
+    print("\nGenerating comparison plots...")
     
-    # Create a DataFrame from the metrics
-    comparison_df = pd.DataFrame(method_metrics).T  # Transpose
+    # --- 1. Plot Relationship Metrics ---
+    # Extract relationship metrics into a DataFrame
+    relationship_data = {}
+    for method_name, metrics in method_metrics.items():
+        rel_metrics = metrics['relationship']
+        relationship_data[method_name] = {
+            'precision': rel_metrics['precision'],
+            'recall': rel_metrics['recall'],
+            'f1': rel_metrics['f1'],
+            'accuracy': rel_metrics.get('accuracy', 0)
+        }
     
-    print("\nComparison results:")
-    # Select P, R, F1, and Accuracy for printing summary, but keep others for potential use
-    print(comparison_df[['precision', 'recall', 'f1', 'accuracy']].round(3))
-
-    metrics_to_plot = ['precision', 'recall', 'f1', 'accuracy']
+    relationship_df = pd.DataFrame(relationship_data).T
+    
+    print("\nRelationship Extraction Comparison Results:")
+    print(relationship_df[['precision', 'recall', 'f1', 'accuracy']].round(3))
+    
     try:
-        plot_df = comparison_df[[col for col in metrics_to_plot if col in comparison_df.columns]]  # Ensure columns exist
-        if not plot_df.empty:
-            plot_df.plot(kind='bar', figsize=(10, 6), rot=0)
-            plt.title(f'Comparison of Extraction Methods - {config.DATA_SOURCE.capitalize()} Data')
-            plt.ylabel('Score')
-            plt.xlabel('Method')
-            plt.ylim(0, 1.05)
-            plt.grid(axis='y', linestyle='--', alpha=0.7)
-            plt.legend(title='Metric')
-            plt.tight_layout()
-            plot_save_path = os.path.join(EXPERIMENT_OUTPUT_DIR, f"{config.DATA_SOURCE}_extractor_comparison.png")
-            plt.savefig(plot_save_path)
-            print(f"\nComparison plot saved to {plot_save_path}")
-            plt.close()
-        else:
-            print("\nSkipping comparison plot: No precision/recall/F1/accuracy data available.")
+        plt.figure(figsize=(10, 6))
+        relationship_df[['precision', 'recall', 'f1', 'accuracy']].plot(kind='bar', rot=0)
+        plt.title(f'Relationship Extraction Comparison - {config.DATA_SOURCE.capitalize()} Data')
+        plt.ylabel('Score')
+        plt.xlabel('Method')
+        plt.ylim(0, 1.05)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.legend(title='Metric')
+        plt.tight_layout()
+        
+        plot_save_path = os.path.join(EXPERIMENT_OUTPUT_DIR, f"{config.DATA_SOURCE}_relationship_comparison.png")
+        plt.savefig(plot_save_path)
+        print(f"Relationship comparison plot saved to {plot_save_path}")
+        plt.close()
     except Exception as e:
-        print(f"\nError generating comparison plot: {e}")
+        print(f"Error generating relationship comparison plot: {e}")
+    
+    # --- 2. Plot PA Likelihood Metrics ---
+    # Extract likelihood metrics into a DataFrame
+    likelihood_data = {}
+    for method_name, metrics in method_metrics.items():
+        pa_metrics = metrics['likelihood']
+        likelihood_data[method_name] = {
+            'mse': pa_metrics.get('mse', 0),
+            'mae': pa_metrics.get('mae', 0),
+            'r2': pa_metrics.get('r2', 0)
+        }
+    
+    likelihood_df = pd.DataFrame(likelihood_data).T
+    
+    print("\nPA Likelihood Prediction Comparison Results:")
+    print(likelihood_df.round(4))
+    
+    try:
+        plt.figure(figsize=(10, 6))
+        # MSE and MAE are error metrics (lower is better), so we'll plot them separately
+        likelihood_df[['r2']].plot(kind='bar', rot=0, color='green')
+        plt.title(f'PA Likelihood R² Comparison - {config.DATA_SOURCE.capitalize()} Data')
+        plt.ylabel('R² Score')
+        plt.xlabel('Method')
+        plt.ylim(0, 1.05)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        
+        r2_plot_path = os.path.join(EXPERIMENT_OUTPUT_DIR, f"{config.DATA_SOURCE}_likelihood_r2_comparison.png")
+        plt.savefig(r2_plot_path)
+        print(f"PA Likelihood R² comparison plot saved to {r2_plot_path}")
+        plt.close()
+        
+        # Plot error metrics
+        plt.figure(figsize=(10, 6))
+        likelihood_df[['mse', 'mae']].plot(kind='bar', rot=0, color=['red', 'orange'])
+        plt.title(f'PA Likelihood Error Metrics - {config.DATA_SOURCE.capitalize()} Data')
+        plt.ylabel('Error Value')
+        plt.xlabel('Method')
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.legend(title='Metric')
+        plt.tight_layout()
+        
+        error_plot_path = os.path.join(EXPERIMENT_OUTPUT_DIR, f"{config.DATA_SOURCE}_likelihood_error_comparison.png")
+        plt.savefig(error_plot_path)
+        print(f"PA Likelihood error metrics comparison plot saved to {error_plot_path}")
+        plt.close()
+    except Exception as e:
+        print(f"Error generating PA likelihood comparison plots: {e}")
 
 if __name__ == "__main__":
     # Read mode and method directly from config
