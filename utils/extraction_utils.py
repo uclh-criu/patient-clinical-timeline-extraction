@@ -17,31 +17,30 @@ from dotenv import load_dotenv
 # Get the appropriate data path based on the config
 def get_data_path(config):
     """
-    Determine the correct dataset path based on the DATA_SOURCE value in config.
+    Get the correct dataset path based on the config.DATA_SOURCE setting.
     
     Args:
-        config: The configuration object containing data source settings.
+        config: Configuration object with DATA_SOURCE and path attributes.
         
     Returns:
-        str: Path to the dataset file to be used.
+        str: Path to the dataset file.
     """
-    if not hasattr(config, 'DATA_SOURCE'):
-        raise ValueError("DATA_SOURCE not defined in config")
-    
     data_source = config.DATA_SOURCE.lower()
     
-    if data_source == 'imaging':
-        return getattr(config, 'IMAGING_DATA_PATH', 'data/processed_notes_with_dates_and_disorders_imaging.csv')
-    elif data_source == 'notes':
-        return getattr(config, 'NOTES_DATA_PATH', 'data/processed_notes_with_dates_and_disorders_notes.csv')
-    elif data_source == 'letters':
-        return getattr(config, 'LETTERS_DATA_PATH', 'data/processed_notes_with_dates_and_disorders_letters.csv')
+    if data_source == 'synthetic':
+        return config.SYNTHETIC_DATA_PATH
+    elif data_source == 'synthetic_updated':
+        return config.SYNTHETIC_UPDATED_DATA_PATH
     elif data_source == 'sample':
-        return getattr(config, 'SAMPLE_DATA_PATH', 'data/sample.csv')
-    elif data_source == 'synthetic':
-        return getattr(config, 'SYNTHETIC_DATA_PATH', 'data/synthetic.csv')
+        return config.SAMPLE_DATA_PATH
+    elif data_source == 'imaging':
+        return config.IMAGING_DATA_PATH
+    elif data_source == 'notes':
+        return config.NOTES_DATA_PATH
+    elif data_source == 'letters':
+        return config.LETTERS_DATA_PATH
     else:
-        raise ValueError(f"Unrecognized DATA_SOURCE '{data_source}'. Valid options are: 'imaging', 'notes', 'letters', 'sample', 'synthetic'")
+        raise ValueError(f"Unknown data source: {data_source}. Valid options are: 'synthetic', 'synthetic_updated', 'sample', 'imaging', 'notes', 'letters'")
 
 def load_and_prepare_data(dataset_path, num_samples, config=None):
     """
@@ -56,7 +55,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     Returns:
         tuple: (prepared_test_data, gold_standard) or (None, None) if loading fails.
                prepared_test_data is a list of dicts {'patient_id': ..., 'note_id': ..., 'note': ..., 'entities': ...}.
-               gold_standard is a list of dicts {'note_id': ..., 'patient_id': ..., 'diagnosis': ..., 'date': ...}.
+               gold_standard is a list of dicts {'note_id': ..., 'patient_id': ..., 'entity_label': ..., 'entity_category': ..., 'date': ...}.
     """
     # If config is provided, use it to get the correct dataset path (ignore the passed dataset_path)
     if config:
@@ -67,7 +66,8 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     gold_column = getattr(config, 'REAL_DATA_GOLD_COLUMN', None)
     
     # Get column names for annotations if they exist in config
-    diagnoses_column = getattr(config, 'REAL_DATA_DIAGNOSES_COLUMN', None)
+    snomed_column = getattr(config, 'REAL_DATA_SNOMED_COLUMN', None)
+    umls_column = getattr(config, 'REAL_DATA_UMLS_COLUMN', None)
     dates_column = getattr(config, 'REAL_DATA_DATES_COLUMN', None)
     timestamp_column = getattr(config, 'REAL_DATA_TIMESTAMP_COLUMN', None)
     
@@ -123,9 +123,19 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                         # Parse the JSON string in the gold standard column
                         gold_json = json.loads(gold_data)
                         
-                        # Check if this is the enhanced format (array of objects) or original format (object with 'relationships')
+                        # New format: expects a list of relationship objects
                         if isinstance(gold_json, list):
-                            # Enhanced format
+                            for rel in gold_json:
+                                if 'entity_label' in rel and 'entity_category' in rel and 'date' in rel:
+                                    gold_standard.append({
+                                        'note_id': i,
+                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                                        'entity_label': str(rel['entity_label']).lower(),
+                                        'entity_category': str(rel['entity_category']).lower(),
+                                        'date': rel['date']
+                                    })
+                        # Legacy format support for diagnoses
+                        elif isinstance(gold_json, list) and 'diagnoses' in gold_json[0]:
                             for entry in gold_json:
                                 # Get the date information
                                 date = entry.get('date')
@@ -139,7 +149,8 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                                         gold_standard.append({
                                             'note_id': i,
                                             'patient_id': row.get(patient_id_column) if patient_id_column else None,
-                                            'diagnosis': str(diag['diagnosis']).lower(),
+                                            'entity_label': str(diag['diagnosis']).lower(),
+                                            'entity_category': 'disorder',  # Default category for legacy data
                                             'date': date  # Already in YYYY-MM-DD format
                                         })
                         # Original format with 'relationships' key
@@ -149,7 +160,8 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                                     gold_standard.append({
                                         'note_id': i,
                                         'patient_id': row.get(patient_id_column) if patient_id_column else None,
-                                        'diagnosis': str(rel['diagnosis']).lower(),
+                                        'entity_label': str(rel['diagnosis']).lower(),
+                                        'entity_category': 'disorder',  # Default category for legacy data
                                         'date': rel['date'] # Assume date is already YYYY-MM-DD
                                     })
                         else:
@@ -172,31 +184,54 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
             # Get the text from the specified column
             text = str(row.get(text_column, ''))
             
-            # Initialize entities as empty lists in case we can't get valid annotations
-            entities = ([], [])
+            # This will become a unified list of all entities from all sources
+            all_entities_list = []
             
-            # Check if we have pre-annotated entities in the CSV and if this is a non-synthetic data source
-            use_annotations = diagnoses_column and dates_column and diagnoses_column in df.columns and dates_column in df.columns
-            
-            if use_annotations:
-                # Get the annotations from the CSV
-                diagnoses_data = row.get(diagnoses_column)
-                dates_data = row.get(dates_column)
-                
-                if pd.notna(diagnoses_data) and pd.notna(dates_data):
+            # Helper function to parse entity data
+            def parse_entities(entity_data, source_name):
+                parsed_list = []
+                if pd.notna(entity_data) and entity_data:
                     try:
-                        # Parse diagnoses annotations from JSON format
-                        diagnoses_list = []
-                        # Transform Python-style string to valid JSON before parsing
-                        valid_diagnoses_json = transform_python_to_json(diagnoses_data)
-                        disorders = json.loads(valid_diagnoses_json)
-                        for disorder in disorders:
-                            label = disorder.get('label', '')
-                            start_pos = disorder.get('start', 0)
-                            diagnoses_list.append((label.lower(), start_pos))
-                        
-                        # Parse dates annotations from JSON format
-                        dates_list = []
+                        valid_json = transform_python_to_json(entity_data)
+                        entities = json.loads(valid_json)
+                        for entity in entities:
+                            # The new format includes 'categories'
+                            categories = entity.get('categories', ['unknown'])
+                            category = categories[0] if categories else 'unknown'
+                            
+                            parsed_list.append({
+                                'label': entity.get('label', '').lower(),
+                                'start': entity.get('start', 0),
+                                'end': entity.get('end', 0),
+                                'category': category,
+                                'source': source_name
+                            })
+                    except (json.JSONDecodeError, TypeError) as e:
+                        print(f"Warning: Could not parse {source_name} entities for row {i}: {e}")
+                return parsed_list
+            
+            # Initialize dates list
+            dates_list = []
+            
+            # Parse SNOMED entities if column exists
+            if snomed_column and snomed_column in df.columns:
+                snomed_entities = parse_entities(row.get(snomed_column), 'snomed')
+                all_entities_list.extend(snomed_entities)
+                if i < 3 and snomed_entities:  # Debug output
+                    print(f"Row {i} SNOMED entities: {snomed_entities[:2]}...")
+
+            # Parse UMLS entities if column exists
+            if umls_column and umls_column in df.columns:
+                umls_entities = parse_entities(row.get(umls_column), 'umls')
+                all_entities_list.extend(umls_entities)
+                if i < 3 and umls_entities:  # Debug output
+                    print(f"Row {i} UMLS entities: {umls_entities[:2]}...")
+            
+            # Parse dates annotations from JSON format
+            if dates_column and dates_column in df.columns:
+                dates_data = row.get(dates_column)
+                if pd.notna(dates_data) and dates_data:
+                    try:
                         # Transform Python-style string to valid JSON before parsing
                         valid_dates_json = transform_python_to_json(dates_data)
                         formatted_dates = json.loads(valid_dates_json)
@@ -206,95 +241,84 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                             start_pos = date_obj.get('start', 0)
                             dates_list.append((parsed_date, original_date, start_pos))
                         
-                        # If we found entities, use them
-                        if diagnoses_list or dates_list:
-                            entities = (diagnoses_list, dates_list)
-                            if i < 3:  # Just for debugging, show first few entities
-                                print(f"Row {i} diagnoses: {diagnoses_list[:2]}...")
-                                print(f"Row {i} dates: {dates_list[:2]}...")
+                        if i < 3 and dates_list:  # Debug output
+                            print(f"Row {i} dates: {dates_list[:2]}...")
+                    except (json.JSONDecodeError, TypeError) as e:
+                        print(f"Warning: Could not parse dates for row {i}: {e}")
+            
+            # The 'entities' object passed to the extractor is now a tuple
+            # containing the unified list of entity dicts and the list of date tuples
+            entities = (all_entities_list, dates_list)
+            
+            # Try to extract relative dates using LLM if enabled and we have a timestamp
+            if relative_date_extraction_enabled:
+                # Get the document timestamp
+                timestamp_str = row.get(timestamp_column)
+                
+                if pd.notna(timestamp_str) and timestamp_str:
+                    try:
+                        # Parse the timestamp string into a datetime object
+                        # Try different formats
+                        document_timestamp = None
+                        timestamp_formats = [
+                            '%Y-%m-%d',              # 2023-10-26
+                            '%Y-%m-%d %H:%M:%S',     # 2023-10-26 15:30:45
+                            '%m/%d/%Y',              # 10/26/2023
+                            '%m/%d/%Y %H:%M:%S',     # 10/26/2023 15:30:45
+                            '%d-%b-%Y',              # 26-Oct-2023
+                            '%d %b %Y',              # 26 Oct 2023
+                            '%d/%m/%Y',              # 14/05/2025
+                        ]
                         
-                        # Try to extract relative dates using LLM if enabled and we have a timestamp
-                        if relative_date_extraction_enabled:
-                            # Get the document timestamp
-                            timestamp_str = row.get(timestamp_column)
+                        for format_str in timestamp_formats:
+                            try:
+                                document_timestamp = datetime.strptime(timestamp_str, format_str)
+                                break
+                            except ValueError:
+                                continue
+                        
+                        if document_timestamp:
+                            # Only print for a few rows to reduce output
+                            if i % 20 == 0 or i < 3:
+                                print(f"Extracting relative dates for row {i} using timestamp: {document_timestamp.strftime('%Y-%m-%d')}")
                             
-                            if pd.notna(timestamp_str) and timestamp_str:
-                                try:
-                                    # Parse the timestamp string into a datetime object
-                                    # Try different formats
-                                    document_timestamp = None
-                                    timestamp_formats = [
-                                        '%Y-%m-%d',              # 2023-10-26
-                                        '%Y-%m-%d %H:%M:%S',     # 2023-10-26 15:30:45
-                                        '%m/%d/%Y',              # 10/26/2023
-                                        '%m/%d/%Y %H:%M:%S',     # 10/26/2023 15:30:45
-                                        '%d-%b-%Y',              # 26-Oct-2023
-                                        '%d %b %Y',              # 26 Oct 2023
-                                        '%d/%m/%Y',              # 14/05/2025
-                                    ]
-                                    
-                                    for format_str in timestamp_formats:
-                                        try:
-                                            document_timestamp = datetime.strptime(timestamp_str, format_str)
-                                            break
-                                        except ValueError:
-                                            continue
-                                    
-                                    if document_timestamp:
-                                        # Only print for a few rows to reduce output
-                                        if i % 20 == 0 or i < 3:
-                                            print(f"Extracting relative dates for row {i} using timestamp: {document_timestamp.strftime('%Y-%m-%d')}")
-                                        
-                                        # Extract relative dates using LLM
-                                        relative_dates = extract_relative_dates_llm(text, document_timestamp, config)
-                                        
-                                        if relative_dates:
-                                            # Append relative dates to existing dates list
-                                            diagnoses_list, dates_list = entities
-                                            combined_dates_list = dates_list + relative_dates
-                                            
-                                            # Update entities with combined dates
-                                            entities = (diagnoses_list, combined_dates_list)
-                                            
-                                            # Convert relative dates to JSON for storage in CSV
-                                            relative_dates_json = []
-                                            for date_tuple in relative_dates:
-                                                parsed_date, original_phrase, start_pos = date_tuple
-                                                relative_dates_json.append({
-                                                    "parsed": parsed_date,
-                                                    "original": original_phrase,
-                                                    "start": start_pos
-                                                })
-                                            
-                                            # Store in the dataframe
-                                            df.at[i, 'llm_extracted_dates'] = json.dumps(relative_dates_json)
-                                            
-                                            if i % 20 == 0 or i < 3:  # Reduce output, just show some samples
-                                                print(f"Row {i} extracted {len(relative_dates)} relative dates")
-                                    else:
-                                        print(f"Warning: Could not parse timestamp '{timestamp_str}' for row {i}")
+                            # Extract relative dates using LLM
+                            relative_dates = extract_relative_dates_llm(text, document_timestamp, config)
+                            
+                            if relative_dates:
+                                # Append relative dates to existing dates list
+                                combined_dates_list = dates_list + relative_dates
                                 
-                                except Exception as e:
-                                    print(f"Error extracting relative dates for row {i}: {e}")
-                            
+                                # Update entities with combined dates
+                                entities = (all_entities_list, combined_dates_list)
+                                
+                                # Convert relative dates to JSON for storage in CSV
+                                relative_dates_json = []
+                                for date_tuple in relative_dates:
+                                    parsed_date, original_phrase, start_pos = date_tuple
+                                    relative_dates_json.append({
+                                        "parsed": parsed_date,
+                                        "original": original_phrase,
+                                        "start": start_pos
+                                    })
+                                
+                                # Store in the dataframe
+                                df.at[i, 'llm_extracted_dates'] = json.dumps(relative_dates_json)
+                                
+                                if i % 20 == 0 or i < 3:  # Reduce output, just show some samples
+                                    print(f"Row {i} extracted {len(relative_dates)} relative dates")
+                        else:
+                            print(f"Warning: Could not parse timestamp '{timestamp_str}' for row {i}")
+                    
                     except Exception as e:
-                        print(f"Warning: Could not parse annotations for row {i}: {e}")
-                        # Don't fall back to extraction for real data, just use empty entities
-                else:
-                    # For empty annotation fields, don't attempt extraction - use empty entities
-                    if i < 3:  # Just for debugging, show first few
-                        print(f"Row {i}: No annotations available, using empty entities")
-            else:
-                # When annotations aren't available, use empty entities for real data
-                if i < 3:  # Reduce output
-                    print(f"Row {i}: Using pre-annotated entities from annotation columns")
+                        print(f"Error extracting relative dates for row {i}: {e}")
             
             # Add to prepared data
             prepared_test_data.append({
                 'patient_id': row.get(patient_id_column) if patient_id_column else None,
                 'note_id': i,
                 'note': text,
-                'entities': entities
+                'entities': entities  # Pass the new unified entity structure
             })
             
             pbar.update(1)
@@ -316,7 +340,7 @@ def run_extraction(extractor, prepared_test_data):
         prepared_test_data (list): List of dicts {'patient_id': ..., 'note_id': ..., 'note': ..., 'entities': ...}.
 
     Returns:
-        list: List of predicted relationships [{'note_id': ..., 'patient_id': ..., 'diagnosis': ..., 'date': ..., 'confidence': ...}].
+        list: List of predicted relationships [{'note_id': ..., 'patient_id': ..., 'entity_label': ..., 'entity_category': ..., 'date': ..., 'confidence': ...}].
     """
     print(f"Generating predictions using {extractor.name}...")
     all_predictions = []
@@ -328,34 +352,60 @@ def run_extraction(extractor, prepared_test_data):
             # Extract relationships using the provided extractor
             relationships = extractor.extract(note_entry['note'], entities=note_entry['entities'])
             for rel in relationships:
-                # Ensure required keys exist and handle potential missing 'date' or 'diagnosis'
+                # Ensure required keys exist and handle potential missing fields
                 raw_date = rel.get('date')
-                raw_diagnosis = rel.get('diagnosis')
-                if raw_date is None or raw_diagnosis is None:
-                    print(f"Warning: Skipping relationship in note {note_id} due to missing 'date' or 'diagnosis'. Rel: {rel}")
+                entity_label = rel.get('entity_label')  # Changed from 'diagnosis'
+                entity_category = rel.get('entity_category', 'unknown')  # New field with default
+
+                if raw_date is None or entity_label is None:
+                    print(f"Warning: Skipping relationship in note {note_id} due to missing 'date' or 'entity_label'. Rel: {rel}")
                     skipped_rels += 1
                     continue
 
-                # Normalize diagnosis (dates should already be in YYYY-MM-DD format from CSV data)
-                normalized_diagnosis = str(raw_diagnosis).strip().lower() # Ensure string, strip, lower
-                date_str = str(raw_date).strip() # Ensure string and strip whitespace
+                # Normalize entity and date
+                normalized_label = str(entity_label).strip().lower()
+                normalized_category = str(entity_category).strip().lower()
+                date_str = str(raw_date).strip()
 
-                if date_str and normalized_diagnosis:
+                if date_str and normalized_label:
                     all_predictions.append({
                         'note_id': note_id,
                         'patient_id': patient_id,
-                        'diagnosis': normalized_diagnosis,
+                        'entity_label': normalized_label,
+                        'entity_category': normalized_category,
                         'date': date_str,
-                        'confidence': rel.get('confidence', 1.0) # Default confidence to 1.0 if missing
+                        'confidence': rel.get('confidence', 1.0)  # Default confidence to 1.0 if missing
                     })
                 else:
                     # Log if validation failed
                     skipped_rels += 1
+                    
+            # Handle legacy extractor output format (with 'diagnosis' instead of 'entity_label')
+            for rel in relationships:
+                if 'diagnosis' in rel and 'entity_label' not in rel:
+                    raw_date = rel.get('date')
+                    raw_diagnosis = rel.get('diagnosis')
+                    
+                    if raw_date is None or raw_diagnosis is None:
+                        continue  # Skip if missing required fields
+                        
+                    # Normalize diagnosis and date
+                    normalized_diagnosis = str(raw_diagnosis).strip().lower()
+                    date_str = str(raw_date).strip()
+                    
+                    if date_str and normalized_diagnosis:
+                        all_predictions.append({
+                            'note_id': note_id,
+                            'patient_id': patient_id,
+                            'entity_label': normalized_diagnosis,
+                            'entity_category': 'disorder',  # Default category for legacy format
+                            'date': date_str,
+                            'confidence': rel.get('confidence', 1.0)
+                        })
         except Exception as e:
             # Log errors during extraction for a specific note
             print(f"Extraction error on note {note_id} for {extractor.name}: {e}")
-            # Optionally, re-raise if you want errors to halt execution: raise e
-            continue # Continue with the next note
+            continue  # Continue with the next note
 
     print(f"Generated {len(all_predictions)} predictions. Skipped {skipped_rels} potentially invalid relationships.")
     return all_predictions
@@ -367,9 +417,9 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
 
     Args:
         all_predictions (list): List of predicted relationships (normalized by the caller).
-                                Each dict must contain 'note_id', 'diagnosis', 'date' (YYYY-MM-DD).
+                                Each dict must contain 'note_id', 'entity_label', 'entity_category', 'date' (YYYY-MM-DD).
         gold_standard (list): List of gold standard relationships (normalized).
-                              Each dict must contain 'note_id', 'diagnosis', 'date' (YYYY-MM-DD).
+                              Each dict must contain 'note_id', 'entity_label', 'entity_category', 'date' (YYYY-MM-DD).
         extractor_name (str): Name of the extractor being evaluated.
         output_dir (str): Directory to save evaluation outputs.
         total_notes_processed (int): The total number of notes processed by the extractor.
@@ -402,6 +452,12 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
     # Filter predictions to include only those from labeled notes
     filtered_predictions = [p for p in all_predictions if p['note_id'] in gold_note_ids]
     
+    # Handle legacy format predictions (with 'diagnosis' instead of 'entity_label')
+    for pred in filtered_predictions:
+        if 'diagnosis' in pred and 'entity_label' not in pred:
+            pred['entity_label'] = pred['diagnosis']
+            pred['entity_category'] = 'disorder'  # Default category for legacy format
+    
     if not filtered_predictions:
         print(f"  No predictions found for the {num_labeled_notes} labeled notes by {extractor_name}.")
         # If no predictions for labeled notes, TP and FP are 0. FN is total gold.
@@ -409,11 +465,11 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
         false_positives = 0
         false_negatives = len(gold_standard) # All gold items were missed
         pred_set = set()  # Empty set for reporting
-        gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in gold_standard)
+        gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in gold_standard)
     else:
         # Convert filtered predictions and gold standard to sets for comparison
-        pred_set = set((p['note_id'], p['diagnosis'], p['date']) for p in filtered_predictions)
-        gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in gold_standard)
+        pred_set = set((p['note_id'], p['entity_label'], p['entity_category'], p['date']) for p in filtered_predictions)
+        gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in gold_standard)
 
         # Calculate TP, FP, FN based on filtered predictions
         true_positives = len(pred_set & gold_set)
@@ -948,11 +1004,11 @@ def aggregate_predictions_by_patient(all_predictions):
     Aggregate predictions by patient to create patient timelines.
     
     Args:
-        all_predictions (list): List of predicted relationships with patient_id, note_id, diagnosis, date, confidence.
+        all_predictions (list): List of predicted relationships with patient_id, note_id, entity_label, entity_category, date, confidence.
         
     Returns:
-        dict: Dictionary with patient_id as keys and list of diagnosis-date relationships as values.
-              Format: {patient_id: [{'diagnosis': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
+        dict: Dictionary with patient_id as keys and list of entity-date relationships as values.
+              Format: {patient_id: [{'entity_label': str, 'entity_category': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
     """
     patient_timelines = {}
     
@@ -964,8 +1020,17 @@ def aggregate_predictions_by_patient(all_predictions):
         if patient_id not in patient_timelines:
             patient_timelines[patient_id] = []
         
+        # Handle legacy format (with 'diagnosis' instead of 'entity_label')
+        if 'diagnosis' in prediction and 'entity_label' not in prediction:
+            entity_label = prediction['diagnosis']
+            entity_category = 'disorder'  # Default category for legacy format
+        else:
+            entity_label = prediction.get('entity_label')
+            entity_category = prediction.get('entity_category', 'unknown')
+        
         patient_timelines[patient_id].append({
-            'diagnosis': prediction['diagnosis'],
+            'entity_label': entity_label,
+            'entity_category': entity_category,
             'date': prediction['date'],
             'confidence': prediction.get('confidence', 1.0),
             'note_id': prediction['note_id']
@@ -983,6 +1048,7 @@ def generate_patient_timelines(patient_timelines, output_dir, extractor_name):
     
     Args:
         patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
+                                  Format: {patient_id: [{'entity_label': str, 'entity_category': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
         output_dir (str): Directory to save timeline files.
         extractor_name (str): Name of the extractor for file naming.
     """
@@ -1010,15 +1076,16 @@ def generate_patient_timelines(patient_timelines, output_dir, extractor_name):
             
             for entry in timeline:
                 f.write(f"Date: {entry['date']}\n")
-                f.write(f"Diagnosis: {entry['diagnosis']}\n")
+                f.write(f"Entity: {entry['entity_label']} ({entry['entity_category']})\n")
                 f.write(f"Confidence: {entry['confidence']:.3f}\n")
                 f.write(f"Source Note: {entry['note_id']}\n")
                 f.write("-" * 40 + "\n")
             
             # Summary statistics
             f.write(f"\nSummary:\n")
-            f.write(f"Total diagnoses: {len(timeline)}\n")
-            f.write(f"Unique diagnoses: {len(set(entry['diagnosis'] for entry in timeline))}\n")
+            f.write(f"Total entities: {len(timeline)}\n")
+            f.write(f"Unique entities: {len(set(entry['entity_label'] for entry in timeline))}\n")
+            f.write(f"Entity categories: {len(set(entry['entity_category'] for entry in timeline))}\n")
             f.write(f"Date range: {timeline[0]['date']} to {timeline[-1]['date']}\n")
     
     print(f"Generated {len(patient_timelines)} patient timeline files in {output_dir}")
@@ -1029,6 +1096,7 @@ def generate_patient_timeline_summary(patient_timelines, output_dir, extractor_n
     
     Args:
         patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
+                                  Format: {patient_id: [{'entity_label': str, 'entity_category': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
         output_dir (str): Directory to save the summary file.
         extractor_name (str): Name of the extractor for file naming.
     """
@@ -1047,12 +1115,19 @@ def generate_patient_timeline_summary(patient_timelines, output_dir, extractor_n
         
         # Overall statistics
         total_patients = len(patient_timelines)
-        total_diagnoses = sum(len(timeline) for timeline in patient_timelines.values())
-        avg_diagnoses_per_patient = total_diagnoses / total_patients if total_patients > 0 else 0
+        total_entities = sum(len(timeline) for timeline in patient_timelines.values())
+        avg_entities_per_patient = total_entities / total_patients if total_patients > 0 else 0
+        
+        # Collect all unique categories
+        all_categories = set()
+        for timeline in patient_timelines.values():
+            for entry in timeline:
+                all_categories.add(entry.get('entity_category', 'unknown'))
         
         f.write(f"Total Patients: {total_patients}\n")
-        f.write(f"Total Diagnoses: {total_diagnoses}\n")
-        f.write(f"Average Diagnoses per Patient: {avg_diagnoses_per_patient:.2f}\n\n")
+        f.write(f"Total Entities: {total_entities}\n")
+        f.write(f"Average Entities per Patient: {avg_entities_per_patient:.2f}\n")
+        f.write(f"Entity Categories: {', '.join(sorted(all_categories))}\n\n")
         
         # Per-patient summary
         f.write("Per-Patient Summary:\n")
@@ -1060,10 +1135,11 @@ def generate_patient_timeline_summary(patient_timelines, output_dir, extractor_n
         
         for patient_id, timeline in sorted(patient_timelines.items()):
             if timeline:
-                unique_diagnoses = len(set(entry['diagnosis'] for entry in timeline))
+                unique_entities = len(set(entry['entity_label'] for entry in timeline))
+                unique_categories = len(set(entry.get('entity_category', 'unknown') for entry in timeline))
                 date_range = f"{timeline[0]['date']} to {timeline[-1]['date']}"
-                f.write(f"Patient {patient_id}: {len(timeline)} diagnoses, {unique_diagnoses} unique, {date_range}\n")
+                f.write(f"Patient {patient_id}: {len(timeline)} entities, {unique_entities} unique, {unique_categories} categories, {date_range}\n")
             else:
-                f.write(f"Patient {patient_id}: No diagnoses\n")
+                f.write(f"Patient {patient_id}: No entities\n")
     
     print(f"Generated patient timeline summary: {summary_path}")

@@ -9,7 +9,7 @@ from utils.training_utils import preprocess_note_for_prediction, create_predicti
 class CustomExtractor(BaseRelationExtractor):
     """
     Relation extractor that uses the custom-trained PyTorch neural network 
-    model (`DiagnosisDateRelationModel`) to identify diagnosis-date relationships.
+    model (`DiagnosisDateRelationModel`) to identify entity-date relationships.
     """
     
     def __init__(self, config):
@@ -78,14 +78,15 @@ class CustomExtractor(BaseRelationExtractor):
         
         Args:
             text (str): The clinical note text.
-            entities (tuple, optional): A tuple of (diagnoses, dates) if already extracted.
+            entities (tuple, optional): A tuple of (entities_list, dates) if already extracted.
             
         Returns:
             list: A list of dictionaries, each representing a relationship:
                 {
-                    'diagnosis': str,      # The diagnosis text
-                    'date': str,           # The date text
-                    'confidence': float    # Model prediction confidence
+                    'entity_label': str,     # The entity text
+                    'entity_category': str,  # The entity category
+                    'date': str,             # The date text
+                    'confidence': float      # Model prediction confidence
                 }
         """
         if self.model is None or self.vocab is None:
@@ -96,15 +97,29 @@ class CustomExtractor(BaseRelationExtractor):
             print("Error: entities parameter is required for CSV data processing.")
             return []
         
-        diagnoses, dates = entities
+        entities_list, dates = entities
+        
+        # Convert the new entity format to the format expected by the model
+        diagnoses = []
+        for entity in entities_list:
+            if isinstance(entity, dict):
+                # New format: dict with label, start, etc.
+                entity_label = entity.get('label', '')
+                entity_pos = entity.get('start', 0)
+                entity_category = entity.get('category', 'unknown')
+                diagnoses.append((entity_label, entity_pos, entity_category))
+            else:
+                # Legacy format: tuple of (label, position)
+                entity_label, entity_pos = entity
+                diagnoses.append((entity_label, entity_pos, 'disorder'))  # Default category
         
         features = preprocess_note_for_prediction(text, self.pred_max_distance)
         # Pass the confirmed lists to the next function
         test_data = create_prediction_dataset(features, self.vocab, self.device, 
                                               self.pred_max_distance, self.pred_max_context_len)
         
-        # Create a dictionary to store all predictions for each diagnosis
-        diagnosis_predictions = {}
+        # Create a dictionary to store all predictions for each entity
+        entity_predictions = {}
         self.model.eval()
         
         with torch.no_grad():
@@ -116,25 +131,39 @@ class CustomExtractor(BaseRelationExtractor):
                 diagnosis = feature['diagnosis']
                 date = feature['date']
                 
-                # Store this prediction for the diagnosis
-                if diagnosis not in diagnosis_predictions:
-                    diagnosis_predictions[diagnosis] = []
+                # Find the corresponding entity category
+                entity_category = 'disorder'  # Default
+                for entity_label, _, category in diagnoses:
+                    if entity_label == diagnosis:
+                        entity_category = category
+                        break
                 
-                diagnosis_predictions[diagnosis].append({
+                # Create a unique key that includes both label and category
+                entity_key = f"{diagnosis}|{entity_category}"
+                
+                # Store this prediction for the entity
+                if entity_key not in entity_predictions:
+                    entity_predictions[entity_key] = []
+                
+                entity_predictions[entity_key].append({
                     'date': date,
                     'confidence': prob
                 })
         
-        # For each diagnosis, select the date with the highest confidence
+        # For each entity, select the date with the highest confidence
         relationships = []
-        for diagnosis, predictions in diagnosis_predictions.items():
+        for entity_key, predictions in entity_predictions.items():
             if predictions:
+                # Split the key back into label and category
+                entity_label, entity_category = entity_key.split('|', 1)
+                
                 # Sort predictions by confidence (highest first)
                 best_prediction = max(predictions, key=lambda x: x['confidence'])
                 
                 # Add the best prediction to our results
                 relationships.append({
-                    'diagnosis': diagnosis,
+                    'entity_label': entity_label,
+                    'entity_category': entity_category,
                     'date': best_prediction['date'],
                     'confidence': best_prediction['confidence']
                 })

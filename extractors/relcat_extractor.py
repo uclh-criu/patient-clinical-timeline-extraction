@@ -4,7 +4,7 @@ from extractors.base_extractor import BaseRelationExtractor
 class RelcatExtractor(BaseRelationExtractor):
     """
     Relation extractor that uses RelCAT component to identify
-    diagnosis-date relationships.
+    entity-date relationships.
     
     Note: This implementation requires the medcat package to be installed.
     """
@@ -70,14 +70,15 @@ class RelcatExtractor(BaseRelationExtractor):
         
         Args:
             text (str): The clinical note text.
-            entities (tuple, optional): A tuple of (diagnoses, dates) if already extracted.
+            entities (tuple, optional): A tuple of (entities_list, dates) if already extracted.
             
         Returns:
             list: A list of dictionaries, each representing a relationship:
                 {
-                    'diagnosis': str,      # The diagnosis text
-                    'date': str,           # The date text
-                    'confidence': float    # Model prediction confidence
+                    'entity_label': str,     # The entity text
+                    'entity_category': str,  # The entity category
+                    'date': str,             # The date text
+                    'confidence': float      # Model prediction confidence
                 }
         """
         if self.model is None:
@@ -99,8 +100,21 @@ class RelcatExtractor(BaseRelationExtractor):
             
             for rel in relations_doc._.relations:
                 if rel['relation'] == 'Has-Temporal':
+                    # Determine entity category based on CUI or default to "disorder"
+                    entity_category = "disorder"  # Default
+                    if 'ent1_cui' in rel:
+                        # This is a placeholder - in a real implementation, you would
+                        # use the CUI to look up the semantic type/category
+                        cui = rel['ent1_cui']
+                        if cui.startswith('S'):
+                            entity_category = "sign or symptom"
+                        elif cui.startswith('P'):
+                            entity_category = "procedure"
+                        # Add more mappings as needed
+                    
                     relationships.append({
-                        'diagnosis': rel['ent1_text'],
+                        'entity_label': rel['ent1_text'],
+                        'entity_category': entity_category,
                         'date': rel['ent2_text'],
                         'confidence': rel['confidence']
                     })

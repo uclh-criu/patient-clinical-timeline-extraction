@@ -6,7 +6,7 @@ class NaiveExtractor(BaseRelationExtractor):
     """
     Relation extractor that uses character proximity as the basis for matching.
     
-    This is a naive approach that assigns each diagnosis to the closest date
+    This is a naive approach that assigns each entity to the closest date
     within a configured maximum distance.
     """
     
@@ -28,16 +28,17 @@ class NaiveExtractor(BaseRelationExtractor):
     
     def extract(self, text, entities=None):
         """
-        Extract relationships between diagnoses and dates based on proximity.
+        Extract relationships between entities and dates based on proximity.
         
         Args:
             text (str): The clinical note text.
-            entities (tuple, optional): A tuple of (diagnoses, dates) if already extracted.
+            entities (tuple, optional): A tuple of (entities_list, dates) if already extracted.
                 
         Returns:
             list: A list of dictionaries, each representing a relationship:
                 {
-                    'diagnosis': str,        # The diagnosis text
+                    'entity_label': str,     # The entity text
+                    'entity_category': str,  # The entity category
                     'date': str,             # The date text
                     'confidence': float,     # Always 1.0 for this method
                     'distance': int          # Character distance
@@ -48,18 +49,29 @@ class NaiveExtractor(BaseRelationExtractor):
             print("Error: entities parameter is required for CSV data processing.")
             return []
         
-        diagnoses, dates = entities
+        entities_list, dates = entities
         
         # Find relationships
         relationships = []
         
-        for diagnosis, diag_pos in diagnoses:
+        # Handle both old format (tuple) and new format (dict)
+        for entity in entities_list:
+            # Check if entity is in the new dict format or old tuple format
+            if isinstance(entity, dict):
+                entity_label = entity.get('label', '')
+                entity_pos = entity.get('start', 0)
+                entity_category = entity.get('category', 'unknown')
+            else:
+                # Legacy format: (label, position)
+                entity_label, entity_pos = entity
+                entity_category = 'disorder'  # Default category for legacy format
+            
             closest_date = None
             min_distance = float('inf')
             
             # Unpack the 3 elements: parsed_date, raw date_str, position
             for parsed_date, date_str, date_pos in dates:
-                distance = abs(diag_pos - date_pos)
+                distance = abs(entity_pos - date_pos)
                 
                 if distance < min_distance and distance <= self.max_distance:
                     min_distance = distance
@@ -67,7 +79,8 @@ class NaiveExtractor(BaseRelationExtractor):
             
             if closest_date:
                 relationships.append({
-                    'diagnosis': diagnosis,
+                    'entity_label': entity_label,
+                    'entity_category': entity_category,
                     'date': closest_date,
                     'confidence': 1.0,  # Always 1.0 for rule-based
                     'distance': min_distance

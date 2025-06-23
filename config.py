@@ -2,8 +2,8 @@ import torch
 
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used.
-# Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic'
-DATA_SOURCE = 'sample'
+# Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated'
+DATA_SOURCE = 'synthetic_updated'
 
 # --- LLM (OpenAI) Extractor Parameters --- #
 OPENAI_MODEL = 'gpt-4o'
@@ -18,17 +18,17 @@ RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama'
-EXTRACTION_METHOD = 'naive'
+EXTRACTION_METHOD = 'openai'
 
 # Methods to include when running in 'compare' mode
 COMPARISON_METHODS = ['naive']
 
 # Whether to generate patient timeline visualizations
-GENERATE_PATIENT_TIMELINES = True
+GENERATE_PATIENT_TIMELINES = False
 TIMELINE_OUTPUT_DIR = 'experiment_outputs/timelines'
 
 # --- Relative Date Extraction LLM Settings --- #
-ENABLE_RELATIVE_DATE_EXTRACTION = True      # Whether to extract relative dates
+ENABLE_RELATIVE_DATE_EXTRACTION = False      # Whether to extract relative dates
 RELATIVE_DATE_LLM_MODEL = 'openai'           # Which LLM to use: 'openai' or 'llama'
 RELATIVE_DATE_OPENAI_MODEL = 'gpt-3.5-turbo' # OpenAI model for relative date extraction (cheaper than gpt-4o)
 RELATIVE_DATE_CONTEXT_WINDOW = 2500         # Maximum context window to send to LLM for date extraction
@@ -36,15 +36,18 @@ RELATIVE_DATE_CONTEXT_WINDOW = 2500         # Maximum context window to send to 
 # --- Data File Paths --- #
 SAMPLE_DATA_PATH = 'data/sample.csv'
 SYNTHETIC_DATA_PATH = 'data/synthetic.csv'
+SYNTHETIC_UPDATED_DATA_PATH = 'data/synthetic_updated.csv'
 IMAGING_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging.csv'
 NOTES_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_notes.csv'
 LETTERS_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_letters.csv'
 
 # --- Data Column Names --- #
-REAL_DATA_TEXT_COLUMN = 'note'              # Column containing clinical notes
 REAL_DATA_PATIENT_ID_COLUMN = 'patient'     # Column containing patient identifiers
+REAL_DATA_TEXT_COLUMN = 'note'              # Column containing clinical notes
 REAL_DATA_TIMESTAMP_COLUMN = 'document_timestamp'   # Column containing document creation timestamp
-REAL_DATA_DIAGNOSES_COLUMN = 'extracted_disorders'  # Column containing pre-extracted disorder entities
+# REAL_DATA_DIAGNOSES_COLUMN = 'extracted_disorders'  # Column containing pre-extracted disorder entities
+REAL_DATA_SNOMED_COLUMN = 'extracted_snomed_entities'  # Column containing pre-extracted SNOMED entities
+REAL_DATA_UMLS_COLUMN = 'extracted_umls_entities'      # Column containing pre-extracted UMLS entities
 REAL_DATA_DATES_COLUMN = 'formatted_dates'          # Column containing pre-extracted date entities
 REAL_DATA_GOLD_COLUMN = 'gold_standard'     # Column containing gold standard labels (if available)
 

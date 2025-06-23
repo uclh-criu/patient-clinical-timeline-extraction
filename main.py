@@ -33,7 +33,7 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
 
     Args:
         patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
-                                  Format: {patient_id: [{'diagnosis': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
+                                  Format: {patient_id: [{'entity_label': str, 'entity_category': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
         output_dir (str): Directory to save the timeline plots.
         extractor_name (str): Name of the extractor for file naming.
     """
@@ -51,24 +51,27 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
         try:
             # Prepare data for visualization
             parsed_dates = []
-            diagnoses = []
+            entity_labels = []
+            entity_categories = []
             confidences = []
             note_ids = []
             
             for entry in timeline:
                 date_str = entry.get('date')
-                diagnosis_str = entry.get('diagnosis')
+                entity_label = entry.get('entity_label')
+                entity_category = entry.get('entity_category', 'unknown')
                 confidence = entry.get('confidence', 1.0)
                 note_id = entry.get('note_id', '')
                 
-                if not date_str or not diagnosis_str:
+                if not date_str or not entity_label:
                     continue
                     
                 try:
                     # Parse the date - should already be in YYYY-MM-DD format
                     parsed_date = datetime.strptime(str(date_str), '%Y-%m-%d')
                     parsed_dates.append(parsed_date)
-                    diagnoses.append(str(diagnosis_str))
+                    entity_labels.append(str(entity_label))
+                    entity_categories.append(str(entity_category))
                     confidences.append(confidence)
                     note_ids.append(note_id)
                 except ValueError:
@@ -95,7 +98,8 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
                         try:
                             parsed_date = datetime.strptime(str(date_str), fmt)
                             parsed_dates.append(parsed_date)
-                            diagnoses.append(str(diagnosis_str))
+                            entity_labels.append(str(entity_label))
+                            entity_categories.append(str(entity_category))
                             confidences.append(confidence)
                             note_ids.append(note_id)
                             parsed = True
@@ -113,7 +117,8 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
                             try:
                                 parsed_date = datetime.strptime(cleaned_date, fmt)
                                 parsed_dates.append(parsed_date)
-                                diagnoses.append(str(diagnosis_str))
+                                entity_labels.append(str(entity_label))
+                                entity_categories.append(str(entity_category))
                                 confidences.append(confidence)
                                 note_ids.append(note_id)
                                 parsed = True
@@ -136,7 +141,8 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
             # Create a DataFrame for plotting
             timeline_df = pd.DataFrame({
                 'date': parsed_dates,
-                'diagnosis': diagnoses,
+                'entity_label': entity_labels,
+                'entity_category': entity_categories,
                 'confidence': confidences,
                 'note_id': note_ids
             }).sort_values(by='date')  # Sort chronologically
@@ -161,9 +167,10 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
             # Draw horizontal reference line
             ax.axhline(0, color='gray', lw=1, linestyle='--', alpha=0.5)
 
-            # Add diagnosis labels with note information
-            for i, (date_obj, diagnosis_str, confidence, note_id) in enumerate(
-                zip(timeline_df['date'], timeline_df['diagnosis'], timeline_df['confidence'], timeline_df['note_id'])):
+            # Add entity labels with note information
+            for i, (date_obj, entity_str, category_str, confidence, note_id) in enumerate(
+                zip(timeline_df['date'], timeline_df['entity_label'], timeline_df['entity_category'], 
+                    timeline_df['confidence'], timeline_df['note_id'])):
                 
                 vertical_pos = y_offsets[i]
                 
@@ -172,8 +179,8 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
                 text_y_offset = 0.25 if text_va == 'bottom' else -0.25
                 text_y = vertical_pos + text_y_offset
                 
-                # Create label with diagnosis and note info
-                label_text = f"{diagnosis_str}"
+                # Create label with entity and note info
+                label_text = f"{entity_str}\n({category_str})"
                 if len(set(timeline_df['note_id'])) > 1:  # Only show note ID if multiple notes
                     label_text += f"\n(Note {note_id})"
                 
@@ -212,15 +219,16 @@ def generate_patient_timeline_visualizations(patient_timelines, output_dir, extr
             ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1, 1))
 
             # Title and labels
-            unique_diagnoses = len(set(timeline_df['diagnosis']))
+            unique_entities = len(set(timeline_df['entity_label']))
+            unique_categories = len(set(timeline_df['entity_category']))
             date_range = f"{timeline_df['date'].min().strftime('%Y-%m-%d')} to {timeline_df['date'].max().strftime('%Y-%m-%d')}"
             
             plt.title(f'Patient {patient_id} - Medical Timeline\n'
-                     f'{len(timeline_df)} diagnoses, {unique_diagnoses} unique conditions\n'
+                     f'{len(timeline_df)} entities, {unique_entities} unique entities, {unique_categories} categories\n'
                      f'({extractor_name}) | {date_range}', 
                      fontsize=12, pad=20)
             plt.xlabel('Date', fontsize=11)
-            plt.ylabel('Diagnoses Timeline', fontsize=11)
+            plt.ylabel('Medical Timeline', fontsize=11)
             
             # Adjust layout
             plt.tight_layout()
@@ -303,20 +311,21 @@ def evaluate_on_dataset():
                 note_predictions[note_id] = []
             
             note_predictions[note_id].append({
-                'diagnosis': pred['diagnosis'],
+                'entity_label': pred['entity_label'],
+                'entity_category': pred.get('entity_category', 'unknown'),
                 'date': pred['date'],
                 'confidence': pred.get('confidence', 1.0)
             })
         
         # Check correctness if gold standard exists
         if gold_standard:
-            # Convert gold_standard to a set of (note_id, diagnosis, date) tuples for easier comparison
-            gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in gold_standard)
+            # Convert gold_standard to a set of (note_id, entity_label, entity_category, date) tuples for easier comparison
+            gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in gold_standard)
             
             # Check each prediction against the gold standard
             for pred in all_predictions:
                 note_id = pred['note_id']
-                is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
+                is_correct = (note_id, pred['entity_label'], pred.get('entity_category', 'unknown'), pred['date']) in gold_set
                 
                 if note_id not in note_correctness:
                     note_correctness[note_id] = []
@@ -477,20 +486,21 @@ def compare_all_methods():
                         note_predictions[note_id] = []
                     
                     note_predictions[note_id].append({
-                        'diagnosis': pred['diagnosis'],
+                        'entity_label': pred['entity_label'],
+                        'entity_category': pred.get('entity_category', 'unknown'),
                         'date': pred['date'],
                         'confidence': pred.get('confidence', 1.0)
                     })
                 
                 # Check correctness if gold standard exists
                 if gold_standard:
-                    # Convert gold_standard to a set of (note_id, diagnosis, date) tuples for easier comparison
-                    gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in gold_standard)
+                    # Convert gold_standard to a set of (note_id, entity_label, entity_category, date) tuples for easier comparison
+                    gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in gold_standard)
                     
                     # Check each prediction against the gold standard
                     for pred in all_predictions:
                         note_id = pred['note_id']
-                        is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
+                        is_correct = (note_id, pred['entity_label'], pred.get('entity_category', 'unknown'), pred['date']) in gold_set
                         
                         if note_id not in note_correctness:
                             note_correctness[note_id] = []

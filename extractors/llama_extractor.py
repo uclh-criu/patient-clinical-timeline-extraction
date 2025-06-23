@@ -7,7 +7,7 @@ from tqdm import tqdm
 class LlamaExtractor(BaseRelationExtractor):
     """
     Relation extractor that uses Llama 3.2 3B model locally to identify 
-    diagnosis-date relationships in clinical notes.
+    entity-date relationships in clinical notes.
     """
     
     def __init__(self, config):
@@ -67,14 +67,15 @@ class LlamaExtractor(BaseRelationExtractor):
         
         Args:
             text (str): The clinical note text.
-            entities (tuple, optional): A tuple of (diagnoses, dates) if already extracted.
+            entities (tuple, optional): A tuple of (entities_list, dates) if already extracted.
             
         Returns:
             list: A list of dictionaries, each representing a relationship:
                 {
-                    'diagnosis': str,      # The diagnosis text
-                    'date': str,           # The date text
-                    'confidence': float    # Model prediction confidence
+                    'entity_label': str,     # The entity text
+                    'entity_category': str,  # The entity category
+                    'date': str,             # The date text
+                    'confidence': float      # Model prediction confidence
                 }
         """
         if self.pipeline is None:
@@ -86,34 +87,51 @@ class LlamaExtractor(BaseRelationExtractor):
             print("Error: entities parameter is required for CSV data processing.")
             return []
         
-        diagnoses, dates = entities
+        entities_list, dates = entities
         
-        # Extract diagnosis names and positions
-        diagnoses_info = [{"diagnosis": d[0], "position": d[1]} for d in diagnoses]
+        # Process entities based on format
+        entities_info = []
+        for entity in entities_list:
+            if isinstance(entity, dict):
+                # New format: dict with label, start, category, etc.
+                entities_info.append({
+                    "entity_label": entity.get('label', ''),
+                    "entity_category": entity.get('category', 'unknown'),
+                    "position": entity.get('start', 0)
+                })
+            else:
+                # Legacy format: tuple of (label, position)
+                entities_info.append({
+                    "entity_label": entity[0],
+                    "entity_category": "disorder",  # Default category
+                    "position": entity[1]
+                })
+        
         # Extract parsed date, raw date string, and position
         dates_info = [{"parsed_date": d[0], "raw_date": d[1], "position": d[2]} for d in dates]
         
         # Construct the messages for the model
-        system_prompt = "You are a medical AI assistant specialized in analyzing clinical notes to find relationships between diagnoses and dates."
+        system_prompt = "You are a medical AI assistant specialized in analyzing clinical notes to find relationships between medical entities and dates."
         
         user_prompt = f"""
-        I need you to identify relationships between diagnoses and dates in a clinical note.
+        I need you to identify relationships between medical entities and dates in a clinical note.
 
-        The full clinical note text is provided below, along with diagnoses and dates that have been extracted, including their positions in the text.
+        The full clinical note text is provided below, along with medical entities and dates that have been extracted, including their positions in the text.
         
-        For each diagnosis listed in 'Diagnoses Info', identify the single most relevant date from the 'Dates Info' list based on the context in the 'Clinical Note'.
+        For each entity listed in 'Entities Info', identify the single most relevant date from the 'Dates Info' list based on the context in the 'Clinical Note'.
 
         Return ONLY a JSON array where each object represents a likely relationship and has the following structure:
         {{
-            "diagnosis": "name of diagnosis from the Diagnoses Info list",
-            "date": "the parsed date (from parsed_date field) associated with the diagnosis in YYYY-MM-DD format",
+            "entity_label": "name of entity from the Entities Info list",
+            "entity_category": "category of the entity from the Entities Info list",
+            "date": "the parsed date (from parsed_date field) associated with the entity in YYYY-MM-DD format",
             "confidence": a number between 0 and 1 indicating your confidence in this association
         }}
-        Do not include diagnoses that have no associated date in the output.
+        Do not include entities that have no associated date in the output.
 
         Clinical Note: {text}
 
-        Diagnoses Info: {diagnoses_info}
+        Entities Info: {entities_info}
         Dates Info: {dates_info}
 
         Provide ONLY the JSON array, no other explanation or text.
