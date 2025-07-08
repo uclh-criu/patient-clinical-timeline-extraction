@@ -147,6 +147,7 @@ class LlamaExtractor(BaseRelationExtractor):
             import sys
             import time
             import threading
+            from queue import Queue, Empty
             
             # Create a threading event to signal when to stop the spinner
             stop_spinner = threading.Event()
@@ -169,24 +170,57 @@ class LlamaExtractor(BaseRelationExtractor):
                 sys.stdout.write("\rInference complete!                                  \n")
                 sys.stdout.flush()
             
+            # Set timeout to 10 minutes (600 seconds)
+            timeout_seconds = 600
+            
+            # Create a queue to get results from the model thread
+            result_queue = Queue()
+            
+            # Define the function to run model inference in a separate thread
+            def run_model_in_thread():
+                try:
+                    outputs = self.pipeline(
+                        messages,
+                        max_new_tokens=2000,
+                        do_sample=False,  # Deterministic generation
+                        temperature=None,  # Explicitly set to None to override defaults
+                        top_p=None,       # Explicitly set to None to override defaults
+                    )
+                    result_queue.put(outputs)
+                except Exception as e:
+                    result_queue.put(e)
+            
             # Start the spinner in a separate thread
             spinner_thread = threading.Thread(target=spinner_function)
             spinner_thread.daemon = True
             spinner_thread.start()
             
+            # Start the model inference in a separate thread
+            model_thread = threading.Thread(target=run_model_in_thread)
+            model_thread.daemon = True
+            model_thread.start()
+            
+            # Wait for the model to complete or timeout
             try:
-                # Run the model
-                outputs = self.pipeline(
-                    messages,
-                    max_new_tokens=2000,
-                    do_sample=False,  # Deterministic generation
-                    temperature=None,  # Explicitly set to None to override defaults
-                    top_p=None,       # Explicitly set to None to override defaults
-                )
-            finally:
-                # Stop the spinner when inference is done (even if there's an error)
+                outputs = result_queue.get(timeout=timeout_seconds)
+                
+                # If we got an exception from the thread, raise it
+                if isinstance(outputs, Exception):
+                    raise outputs
+                    
+            except Empty:
+                # If we timeout, stop the spinner and return empty results
                 stop_spinner.set()
-                spinner_thread.join(timeout=1.0)  # Wait for spinner to finish
+                spinner_thread.join(timeout=1.0)
+                sys.stdout.write(f"\nError: Model inference timed out after {timeout_seconds / 60:.0f} minutes. Skipping this row.\n")
+                sys.stdout.flush()
+                print("Warning: The timed-out model process might still be running in the background.", file=sys.stderr)
+                return []
+            finally:
+                # Make sure to stop the spinner when we're done
+                if not stop_spinner.is_set():
+                    stop_spinner.set()
+                    spinner_thread.join(timeout=1.0)
             
             # Based on the example in llama.py, we extract the assistant's response
             # which is the last message in the generated output
