@@ -9,22 +9,37 @@ import re
 
 # Import from our modules
 from extractors.extractor_factory import create_extractor
-from utils.extraction_utils import (
-    calculate_and_report_metrics,
-    load_and_prepare_data,
-    run_extraction,
-    get_data_path,
-    transform_python_to_json,
-    extract_relative_dates_llm,
-    aggregate_predictions_by_patient,
-    generate_patient_timelines,
-    generate_patient_timeline_summary,
-    calculate_entity_metrics,
-    calculate_relationship_metrics,
-    predict_pa_likelihood,
-    calculate_likelihood_metrics
-)
 import config
+
+# Dynamically import the appropriate extraction_utils module based on ENTITY_MODE
+if config.ENTITY_MODE == 'disorder_only':
+    from utils.extraction_utils_disorder_only import (
+        calculate_and_report_metrics,
+        load_and_prepare_data,
+        run_extraction,
+        get_data_path,
+        transform_python_to_json,
+        extract_relative_dates_llm,
+        aggregate_predictions_by_patient,
+        generate_patient_timelines,
+        generate_patient_timeline_summary
+    )
+else:  # 'multi_entity' mode
+    from utils.extraction_utils import (
+        calculate_and_report_metrics,
+        load_and_prepare_data,
+        run_extraction,
+        get_data_path,
+        transform_python_to_json,
+        extract_relative_dates_llm,
+        aggregate_predictions_by_patient,
+        generate_patient_timelines,
+        generate_patient_timeline_summary,
+        calculate_entity_metrics,
+        calculate_relationship_metrics,
+        predict_pa_likelihood,
+        calculate_likelihood_metrics
+    )
 
 # Define the output directory using absolute path if project_root is available
 if 'project_root' not in locals() and 'project_root' not in globals():
@@ -265,13 +280,30 @@ def evaluate_on_dataset():
     num_test_samples = None
 
     # --- 1. Load and prepare data using the helper function, passing the config ---
-    prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+    if config.ENTITY_MODE == 'disorder_only':
+        # In disorder_only mode, load_and_prepare_data returns only 2 values
+        prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+        # Set these to None as they're not used in disorder_only mode
+        entity_gold = None
+        pa_likelihood_gold = None
+    else:
+        # In multi_entity mode, load_and_prepare_data returns 4 values
+        prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+    
     if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting evaluation.")
         return
 
     # --- 2. Entity Extraction (NER) Evaluation ---
-    entity_metrics = calculate_entity_metrics(prepared_test_data, entity_gold, EXPERIMENT_OUTPUT_DIR)
+    if config.ENTITY_MODE == 'disorder_only':
+        # Skip entity metrics in disorder_only mode
+        entity_metrics = {
+            'precision': 0,
+            'recall': 0,
+            'f1': 0
+        }
+    else:
+        entity_metrics = calculate_entity_metrics(prepared_test_data, entity_gold, EXPERIMENT_OUTPUT_DIR)
 
     # --- 3. Relationship Extraction (RE) Evaluation ---
     # Create and load extractor
@@ -290,24 +322,46 @@ def evaluate_on_dataset():
     # Calculate and report relationship metrics
     print("\nCalculating relationship metrics...")
     os.makedirs(EXPERIMENT_OUTPUT_DIR, exist_ok=True)
-    relationship_metrics = calculate_relationship_metrics(
-        all_predictions,
-        relationship_gold,
-        extractor.name,
-        EXPERIMENT_OUTPUT_DIR,
-        len(prepared_test_data),
-        dataset_path
-    )
+    
+    if config.ENTITY_MODE == 'disorder_only':
+        # In disorder_only mode, use calculate_and_report_metrics
+        relationship_metrics = calculate_and_report_metrics(
+            all_predictions,
+            relationship_gold,
+            extractor.name,
+            EXPERIMENT_OUTPUT_DIR,
+            len(prepared_test_data),
+            dataset_path
+        )
+    else:
+        # In multi_entity mode, use calculate_relationship_metrics
+        relationship_metrics = calculate_relationship_metrics(
+            all_predictions,
+            relationship_gold,
+            extractor.name,
+            EXPERIMENT_OUTPUT_DIR,
+            len(prepared_test_data),
+            dataset_path
+        )
     
     # --- 4. Timeline Generation and PA Likelihood Prediction ---
     # Aggregate predictions by patient
     patient_timelines = aggregate_predictions_by_patient(all_predictions)
     
-    # Predict PA likelihood
-    predicted_likelihoods = predict_pa_likelihood(patient_timelines)
-    
-    # Evaluate likelihood predictions
-    likelihood_metrics = calculate_likelihood_metrics(predicted_likelihoods, pa_likelihood_gold, EXPERIMENT_OUTPUT_DIR)
+    # Predict PA likelihood and calculate metrics
+    if config.ENTITY_MODE == 'disorder_only':
+        # Skip PA likelihood prediction in disorder_only mode
+        predicted_likelihoods = {}
+        likelihood_metrics = {
+            'mse': 0,
+            'mae': 0,
+            'r2': 0
+        }
+    else:
+        # Predict PA likelihood
+        predicted_likelihoods = predict_pa_likelihood(patient_timelines)
+        # Evaluate likelihood predictions
+        likelihood_metrics = calculate_likelihood_metrics(predicted_likelihoods, pa_likelihood_gold, EXPERIMENT_OUTPUT_DIR)
     
     # Save predictions to CSV
     print(f"\nSaving predictions to {dataset_path}...")
@@ -332,27 +386,50 @@ def evaluate_on_dataset():
             if note_id not in note_predictions:
                 note_predictions[note_id] = []
             
-            note_predictions[note_id].append({
-                'entity_label': pred['entity_label'],
-                'entity_category': pred.get('entity_category', 'unknown'),
-                'date': pred['date'],
-                'confidence': pred.get('confidence', 1.0)
-            })
+            # Handle different field names between disorder_only and multi_entity modes
+            if config.ENTITY_MODE == 'disorder_only':
+                note_predictions[note_id].append({
+                    'diagnosis': pred['diagnosis'],  # disorder_only mode uses 'diagnosis'
+                    'date': pred['date'],
+                    'confidence': pred.get('confidence', 1.0)
+                })
+            else:
+                note_predictions[note_id].append({
+                    'entity_label': pred['entity_label'],  # multi_entity mode uses 'entity_label'
+                    'entity_category': pred.get('entity_category', 'unknown'),
+                    'date': pred['date'],
+                    'confidence': pred.get('confidence', 1.0)
+                })
         
         # Check correctness if relationship gold standard exists
         if relationship_gold:
-            # Convert gold_standard to a set of (note_id, entity_label, entity_category, date) tuples for easier comparison
-            gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
-            
-            # Check each prediction against the gold standard
-            for pred in all_predictions:
-                note_id = pred['note_id']
-                is_correct = (note_id, pred['entity_label'], pred.get('entity_category', 'unknown'), pred['date']) in gold_set
+            # Convert gold_standard to a set for easier comparison
+            if config.ENTITY_MODE == 'disorder_only':
+                # In disorder_only mode, gold standard has 'diagnosis' field
+                gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in relationship_gold)
                 
-                if note_id not in note_correctness:
-                    note_correctness[note_id] = []
+                # Check each prediction against the gold standard
+                for pred in all_predictions:
+                    note_id = pred['note_id']
+                    is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
                     
-                note_correctness[note_id].append(is_correct)
+                    if note_id not in note_correctness:
+                        note_correctness[note_id] = []
+                        
+                    note_correctness[note_id].append(is_correct)
+            else:
+                # In multi_entity mode, gold standard has 'entity_label' and 'entity_category' fields
+                gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
+                
+                # Check each prediction against the gold standard
+                for pred in all_predictions:
+                    note_id = pred['note_id']
+                    is_correct = (note_id, pred['entity_label'], pred.get('entity_category', 'unknown'), pred['date']) in gold_set
+                    
+                    if note_id not in note_correctness:
+                        note_correctness[note_id] = []
+                        
+                    note_correctness[note_id].append(is_correct)
         
         # Add predictions to dataframe
         df[predictions_column] = None
@@ -446,7 +523,16 @@ def compare_all_methods():
     print(f"Using dataset: {dataset_path}")
 
     # Load and prepare data once using the helper function, passing the config
-    prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+    if config.ENTITY_MODE == 'disorder_only':
+        # In disorder_only mode, load_and_prepare_data returns only 2 values
+        prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+        # Set these to None as they're not used in disorder_only mode
+        entity_gold = None
+        pa_likelihood_gold = None
+    else:
+        # In multi_entity mode, load_and_prepare_data returns 4 values
+        prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+    
     if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting comparison.")
         return
@@ -454,7 +540,16 @@ def compare_all_methods():
     # --- 1. Entity Extraction (NER) Evaluation ---
     # This only needs to be done once as it's the same for all methods
     print("\n=== ENTITY EXTRACTION EVALUATION ===")
-    entity_metrics = calculate_entity_metrics(prepared_test_data, entity_gold, EXPERIMENT_OUTPUT_DIR)
+    if config.ENTITY_MODE == 'disorder_only':
+        # Skip entity metrics in disorder_only mode
+        entity_metrics = {
+            'precision': 0,
+            'recall': 0,
+            'f1': 0
+        }
+        print("Entity extraction evaluation skipped in disorder_only mode.")
+    else:
+        entity_metrics = calculate_entity_metrics(prepared_test_data, entity_gold, EXPERIMENT_OUTPUT_DIR)
 
     # Load extractors
     extractors_to_compare = []
@@ -499,25 +594,47 @@ def compare_all_methods():
             
             # Calculate relationship metrics
             print(f"Calculating relationship metrics for {extractor.name}...")
-            relationship_metrics = calculate_relationship_metrics(
-                all_predictions,
-                relationship_gold,
-                extractor.name,
-                EXPERIMENT_OUTPUT_DIR,
-                len(prepared_test_data),
-                dataset_path
-            )
+            if config.ENTITY_MODE == 'disorder_only':
+                # In disorder_only mode, use calculate_and_report_metrics
+                relationship_metrics = calculate_and_report_metrics(
+                    all_predictions,
+                    relationship_gold,
+                    extractor.name,
+                    EXPERIMENT_OUTPUT_DIR,
+                    len(prepared_test_data),
+                    dataset_path
+                )
+            else:
+                # In multi_entity mode, use calculate_relationship_metrics
+                relationship_metrics = calculate_relationship_metrics(
+                    all_predictions,
+                    relationship_gold,
+                    extractor.name,
+                    EXPERIMENT_OUTPUT_DIR,
+                    len(prepared_test_data),
+                    dataset_path
+                )
             
             # --- 3. PA Likelihood Prediction ---
             # Aggregate predictions by patient
             patient_timelines = aggregate_predictions_by_patient(all_predictions)
             
-            # Predict PA likelihood
-            predicted_likelihoods = predict_pa_likelihood(patient_timelines)
-            all_method_pa_likelihoods[extractor.name] = predicted_likelihoods
+            # Predict PA likelihood and calculate metrics
+            if config.ENTITY_MODE == 'disorder_only':
+                # Skip PA likelihood prediction in disorder_only mode
+                predicted_likelihoods = {}
+                likelihood_metrics = {
+                    'mse': 0,
+                    'mae': 0,
+                    'r2': 0
+                }
+            else:
+                # Predict PA likelihood
+                predicted_likelihoods = predict_pa_likelihood(patient_timelines)
+                # Evaluate likelihood predictions
+                likelihood_metrics = calculate_likelihood_metrics(predicted_likelihoods, pa_likelihood_gold, EXPERIMENT_OUTPUT_DIR)
             
-            # Evaluate likelihood predictions
-            likelihood_metrics = calculate_likelihood_metrics(predicted_likelihoods, pa_likelihood_gold, EXPERIMENT_OUTPUT_DIR)
+            all_method_pa_likelihoods[extractor.name] = predicted_likelihoods
             
             # Store all metrics
             all_method_metrics[extractor.name] = {
@@ -556,27 +673,49 @@ def compare_all_methods():
                     if note_id not in note_predictions:
                         note_predictions[note_id] = []
                     
-                    note_predictions[note_id].append({
-                        'entity_label': pred['entity_label'],
-                        'entity_category': pred.get('entity_category', 'unknown'),
-                        'date': pred['date'],
-                        'confidence': pred.get('confidence', 1.0)
-                    })
+                    # Handle different field names between disorder_only and multi_entity modes
+                    if config.ENTITY_MODE == 'disorder_only':
+                        note_predictions[note_id].append({
+                            'diagnosis': pred['diagnosis'],  # disorder_only mode uses 'diagnosis'
+                            'date': pred['date'],
+                            'confidence': pred.get('confidence', 1.0)
+                        })
+                    else:
+                        note_predictions[note_id].append({
+                            'entity_label': pred['entity_label'],  # multi_entity mode uses 'entity_label'
+                            'entity_category': pred.get('entity_category', 'unknown'),
+                            'date': pred['date'],
+                            'confidence': pred.get('confidence', 1.0)
+                        })
                 
                 # Check correctness if gold standard exists
                 if relationship_gold:
-                    # Convert gold_standard to a set of (note_id, entity_label, entity_category, date) tuples for easier comparison
-                    gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
-                    
-                    # Check each prediction against the gold standard
-                    for pred in all_predictions:
-                        note_id = pred['note_id']
-                        is_correct = (note_id, pred['entity_label'], pred.get('entity_category', 'unknown'), pred['date']) in gold_set
+                    if config.ENTITY_MODE == 'disorder_only':
+                        # In disorder_only mode, gold standard has 'diagnosis' field
+                        gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in relationship_gold)
                         
-                        if note_id not in note_correctness:
-                            note_correctness[note_id] = []
+                        # Check each prediction against the gold standard
+                        for pred in all_predictions:
+                            note_id = pred['note_id']
+                            is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
                             
-                        note_correctness[note_id].append(is_correct)
+                            if note_id not in note_correctness:
+                                note_correctness[note_id] = []
+                                
+                            note_correctness[note_id].append(is_correct)
+                    else:
+                        # In multi_entity mode, gold standard has 'entity_label' and 'entity_category' fields
+                        gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
+                        
+                        # Check each prediction against the gold standard
+                        for pred in all_predictions:
+                            note_id = pred['note_id']
+                            is_correct = (note_id, pred['entity_label'], pred.get('entity_category', 'unknown'), pred['date']) in gold_set
+                            
+                            if note_id not in note_correctness:
+                                note_correctness[note_id] = []
+                                
+                            note_correctness[note_id].append(is_correct)
                 
                 # Add predictions to dataframe
                 original_df[predictions_column] = None

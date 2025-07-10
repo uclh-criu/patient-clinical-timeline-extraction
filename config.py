@@ -3,7 +3,12 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used.
 # Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated'
-DATA_SOURCE = 'synthetic_updated'
+DATA_SOURCE = 'imaging'
+
+# --- Entity Mode Setting --- #
+# Controls which entity types to extract
+# Valid options: 'disorder_only', 'multi_entity'
+ENTITY_MODE = 'disorder_only'
 
 # --- LLM (OpenAI) Extractor Parameters --- #
 OPENAI_MODEL = 'gpt-4o'
@@ -18,7 +23,7 @@ RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama'
-EXTRACTION_METHOD = 'llama'
+EXTRACTION_METHOD = 'naive'
 
 # Methods to include when running in 'compare' mode
 COMPARISON_METHODS = ['naive']
@@ -37,7 +42,7 @@ RELATIVE_DATE_CONTEXT_WINDOW = 2500         # Maximum context window to send to 
 SAMPLE_DATA_PATH = 'data/sample.csv'
 SYNTHETIC_DATA_PATH = 'data/synthetic.csv'
 SYNTHETIC_UPDATED_DATA_PATH = 'data/synthetic_updated.csv'
-IMAGING_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging.csv'
+IMAGING_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging_labelled.csv'
 NOTES_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_notes.csv'
 LETTERS_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_letters.csv'
 
@@ -45,9 +50,14 @@ LETTERS_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_letters.csv'
 REAL_DATA_PATIENT_ID_COLUMN = 'patient'     # Column containing patient identifiers
 REAL_DATA_TEXT_COLUMN = 'note'              # Column containing clinical notes
 REAL_DATA_TIMESTAMP_COLUMN = 'document_timestamp'   # Column containing document creation timestamp
-# REAL_DATA_DIAGNOSES_COLUMN = 'extracted_disorders'  # Column containing pre-extracted disorder entities
+
+# Column containing pre-extracted disorder entities (used in disorder_only mode)
+REAL_DATA_DIAGNOSES_COLUMN = 'extracted_disorders'  
+
+# Columns containing pre-extracted entities (used in multi_entity mode)
 REAL_DATA_SNOMED_COLUMN = 'extracted_snomed_entities'  # Column containing pre-extracted SNOMED entities
 REAL_DATA_UMLS_COLUMN = 'extracted_umls_entities'      # Column containing pre-extracted UMLS entities
+
 REAL_DATA_DATES_COLUMN = 'formatted_dates'          # Column containing pre-extracted date entities
 REAL_DATA_GOLD_COLUMN = 'relationship_gold'     # Column containing gold standard labels for relationships (if available)
 
