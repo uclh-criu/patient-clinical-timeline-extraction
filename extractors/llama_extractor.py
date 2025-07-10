@@ -61,13 +61,15 @@ class LlamaExtractor(BaseRelationExtractor):
             print(f"Error setting up Llama model: {e}")
             return False
     
-    def extract(self, text, entities=None):
+    def extract(self, text, entities=None, note_id=None, patient_id=None):
         """
         Extract relationships using the Llama 3.2 model.
         
         Args:
             text (str): The clinical note text.
             entities (tuple, optional): A tuple of (entities_list, dates) if already extracted.
+            note_id (int, optional): The ID of the note being processed.
+            patient_id (str, optional): The ID of the patient the note belongs to.
             
         Returns:
             list: A list of dictionaries, each representing a relationship:
@@ -78,6 +80,20 @@ class LlamaExtractor(BaseRelationExtractor):
                     'confidence': float      # Model prediction confidence
                 }
         """
+        import time
+        import hashlib
+        
+        # Use provided IDs if available, otherwise generate a hash
+        if note_id is not None and patient_id is not None:
+            row_id = f"Patient {patient_id}, Note {note_id}"
+        else:
+            # Generate a unique ID for this text to help identify problematic rows
+            text_hash = hashlib.md5(text[:100].encode()).hexdigest()[:8]
+            row_id = f"Hash {text_hash}"
+        
+        print(f"\nProcessing {row_id} (length: {len(text)} chars, first 50: '{text[:50].replace(chr(10), ' ')}...')")
+        
+        start_time = time.time()
         if self.pipeline is None:
             print("Llama model not initialized. Call load() first.")
             return []
@@ -114,27 +130,48 @@ class LlamaExtractor(BaseRelationExtractor):
         system_prompt = "You are a medical AI assistant specialized in analyzing clinical notes to find relationships between medical entities and dates."
         
         user_prompt = f"""
-        I need you to identify relationships between medical entities and dates in a clinical note.
-
-        The full clinical note text is provided below, along with medical entities and dates that have been extracted, including their positions in the text.
+        You are a medical AI assistant. Your task is to find relationships between medical entities and dates in a clinical note.
         
-        For each entity listed in 'Entities Info', identify the single most relevant date from the 'Dates Info' list based on the context in the 'Clinical Note'.
+        For each entity in 'Entities Info', find the most relevant date from 'Dates Info'.
 
-        Return ONLY a JSON array where each object represents a likely relationship and has the following structure:
-        {{
-            "entity_label": "name of entity from the Entities Info list",
-            "entity_category": "category of the entity from the Entities Info list",
-            "date": "the parsed date (from parsed_date field) associated with the entity in YYYY-MM-DD format",
-            "confidence": a number between 0 and 1 indicating your confidence in this association
-        }}
-        Do not include entities that have no associated date in the output.
+        **CRITICAL INSTRUCTIONS:**
+        1.  **Return ONLY a JSON array.** Do not include any other text, explanations, or formatting.
+        2.  **ONLY include entities with a valid, non-null date.** If you cannot find a date for an entity, you MUST OMIT it from your response entirely.
+        3.  The `date` field in the JSON MUST be a string in "YYYY-MM-DD" format. It cannot be `null`.
 
+        **EXAMPLE OF GOOD OUTPUT:**
+        ```json
+        [
+          {{
+            "entity_label": "hematoma",
+            "entity_category": "disorder",
+            "date": "2019-04-18",
+            "confidence": 0.9
+          }}
+        ]
+        ```
+
+        **EXAMPLE OF BAD OUTPUT (DO NOT DO THIS):**
+        ```json
+        [
+          {{
+            "entity_label": "headache",
+            "entity_category": "symptom",
+            "date": null,
+            "confidence": 0.1
+          }}
+        ]
+        ```
+
+        ---
         Clinical Note: {text}
-
+        ---
         Entities Info: {entities_info}
+        ---
         Dates Info: {dates_info}
+        ---
 
-        Provide ONLY the JSON array, no other explanation or text.
+        Your JSON response:
         """
         
         messages = [
@@ -143,84 +180,77 @@ class LlamaExtractor(BaseRelationExtractor):
         ]
         
         try:
-            # Show a continuous spinner during inference
             import sys
             import time
             import threading
             from queue import Queue, Empty
-            
-            # Create a threading event to signal when to stop the spinner
+
+            # Timeout in seconds (10 minutes)
+            timeout_seconds = 600
+
+            # Queue to hold the result from the model thread
+            result_queue = Queue()
+
+            # This function will run in a separate thread
+            def run_model_in_thread():
+                try:
+                    outputs = self.pipeline(
+                        messages,
+                        max_new_tokens=2000,
+                        do_sample=False,
+                        temperature=None,
+                        top_p=None,
+                    )
+                    result_queue.put(outputs)
+                except Exception as e:
+                    result_queue.put(e)
+
+            # Start the model inference in a separate thread
+            model_thread = threading.Thread(target=run_model_in_thread)
+            model_thread.daemon = True
+            model_thread.start()
+
+            # --- Spinner setup ---
             stop_spinner = threading.Event()
-            
-            # Define the spinner function
             def spinner_function():
                 chars = "|/-\\"
                 i = 0
-                start_time = time.time()
-                while not stop_spinner.is_set():
-                    elapsed = int(time.time() - start_time)
+                spinner_start_time = time.time()
+                while not stop_spinner.is_set() and model_thread.is_alive():
+                    elapsed = int(time.time() - spinner_start_time)
                     mins, secs = divmod(elapsed, 60)
                     timeformat = f"{mins:02d}:{secs:02d}"
                     sys.stdout.write(f"\rGenerating response... {chars[i % len(chars)]} [{timeformat} elapsed]")
                     sys.stdout.flush()
                     time.sleep(0.1)
                     i += 1
-                
-                # Clear the spinner line when done
-                sys.stdout.write("\rInference complete!                                  \n")
-                sys.stdout.flush()
             
-            # Set timeout to 10 minutes (600 seconds)
-            timeout_seconds = 600
-            
-            # Create a queue to get results from the model thread
-            result_queue = Queue()
-            
-            # Define the function to run model inference in a separate thread
-            def run_model_in_thread():
-                try:
-                    outputs = self.pipeline(
-                        messages,
-                        max_new_tokens=2000,
-                        do_sample=False,  # Deterministic generation
-                        temperature=None,  # Explicitly set to None to override defaults
-                        top_p=None,       # Explicitly set to None to override defaults
-                    )
-                    result_queue.put(outputs)
-                except Exception as e:
-                    result_queue.put(e)
-            
-            # Start the spinner in a separate thread
             spinner_thread = threading.Thread(target=spinner_function)
             spinner_thread.daemon = True
             spinner_thread.start()
+            # --- End of spinner setup ---
             
-            # Start the model inference in a separate thread
-            model_thread = threading.Thread(target=run_model_in_thread)
-            model_thread.daemon = True
-            model_thread.start()
-            
-            # Wait for the model to complete or timeout
+            outputs = None
             try:
+                # Wait for the result from the queue, with a timeout
                 outputs = result_queue.get(timeout=timeout_seconds)
-                
-                # If we got an exception from the thread, raise it
+
                 if isinstance(outputs, Exception):
                     raise outputs
-                    
+            
             except Empty:
-                # If we timeout, stop the spinner and return empty results
+                # This block executes if result_queue.get() times out
+                print(f"\nERROR: Model inference for row with ID {row_id} timed out after {timeout_seconds / 60:.0f} minutes. Skipping.")
+                print(f"Warning: The timed-out model process might still be running in the background.", file=sys.stderr)
+                return []
+
+            finally:
+                # Stop the spinner thread
                 stop_spinner.set()
                 spinner_thread.join(timeout=1.0)
-                sys.stdout.write(f"\nError: Model inference timed out after {timeout_seconds / 60:.0f} minutes. Skipping this row.\n")
-                sys.stdout.flush()
-                print("Warning: The timed-out model process might still be running in the background.", file=sys.stderr)
-                return []
-            finally:
-                # Make sure to stop the spinner when we're done
-                if not stop_spinner.is_set():
-                    stop_spinner.set()
-                    spinner_thread.join(timeout=1.0)
+                if outputs is not None:
+                    sys.stdout.write("\rInference complete!                                  \n")
+                    sys.stdout.flush()
             
             # Based on the example in llama.py, we extract the assistant's response
             # which is the last message in the generated output
@@ -243,6 +273,11 @@ class LlamaExtractor(BaseRelationExtractor):
                     print("Attempting fallback extraction...")
                     response_content = str(outputs[0])
             
+            # --- DEBUG: Print the raw model response for analysis ---
+            print(f"\n--- Model Response for Note ID {row_id} ---")
+            print(response_content[:500] + "..." if len(response_content) > 500 else response_content)
+            print("--- End Model Response ---\n")
+            
             # Extract JSON from the response
             start_idx = response_content.find('[')
             end_idx = response_content.rfind(']') + 1
@@ -261,8 +296,22 @@ class LlamaExtractor(BaseRelationExtractor):
                                 rel['confidence'] = 0.5
                         else:
                             rel['confidence'] = 1.0
+                    
+                    # --- DEBUG: Print each prediction as it's processed ---
+                    print(f"\n=== Predictions for Note ID {row_id} ===")
+                    if relationships:
+                        for i, rel in enumerate(relationships):
+                            print(f"  Prediction {i+1}: {rel}")
+                    else:
+                        print("  No predictions found in model response")
+                    print(f"=== End Predictions for Note ID {row_id} ===\n")
+                    
+                    # Filter out any relationships with None dates
+                    valid_relationships = [rel for rel in relationships if rel.get('date') is not None]
+                    if len(valid_relationships) < len(relationships):
+                        print(f"  Filtered out {len(relationships) - len(valid_relationships)} relationships with None dates")
                             
-                    return relationships
+                    return valid_relationships
                 except json.JSONDecodeError as e:
                     print(f"Error parsing JSON: {e}")
                     print(f"JSON string: {json_str[:100]}...")
@@ -274,4 +323,4 @@ class LlamaExtractor(BaseRelationExtractor):
             
         except Exception as e:
             print(f"Error during model inference or processing: {e}")
-            return [] 
+            return []
