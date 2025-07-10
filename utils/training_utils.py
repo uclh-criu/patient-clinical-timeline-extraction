@@ -51,16 +51,33 @@ def load_and_prepare_data(file_or_dataset, MAX_DISTANCE, VocabClass=None):
     notes_with_entities = 0
     total_examples = 0
     
-    # Import locally to avoid circular imports
-    from utils.extraction_utils import extract_entities
-    
     for entry in dataset:
         total_notes += 1
         clinical_note = entry['clinical_note']
         ground_truth = entry['ground_truth']
         
-        # Extract entities (dates are now pre-parsed)
-        diagnoses, dates = extract_entities(clinical_note)
+        # Use pre-extracted disorders and dates if available
+        extracted_disorders = entry.get('extracted_disorders', [])
+        formatted_dates = entry.get('formatted_dates', [])
+        
+        # Convert extracted disorders to the format we need
+        diagnoses = []
+        if extracted_disorders:
+            for disorder in json.loads(extracted_disorders) if isinstance(extracted_disorders, str) else extracted_disorders:
+                if isinstance(disorder, dict):
+                    label = disorder.get('label', '')
+                    start = disorder.get('start', 0)
+                    diagnoses.append((label, start))
+        
+        # Convert formatted dates to the format we need
+        dates = []
+        if formatted_dates:
+            for date in json.loads(formatted_dates) if isinstance(formatted_dates, str) else formatted_dates:
+                if isinstance(date, dict):
+                    parsed = date.get('parsed', '')
+                    original = date.get('original', '')
+                    start = date.get('start', 0)
+                    dates.append((parsed, original, start))
         
         if diagnoses and dates:
             notes_with_entities += 1
@@ -236,71 +253,3 @@ def plot_training_curves(train_losses, val_losses, val_accs, save_path):
     plt.show()
     
     print(f"Training curves saved to {plot_path}")
-
-def preprocess_note_for_prediction(note, MAX_DISTANCE=500):
-    """Extract and preprocess features from a clinical note for prediction"""
-    # Import locally to avoid circular imports
-    from utils.extraction_utils import extract_entities
-    
-    # Extract entities
-    diagnoses, dates = extract_entities(note)
-    
-    # Build features for each diagnosis-date pair
-    features = []
-    for diagnosis, diag_pos in diagnoses:
-        # Correctly unpack the 3-element tuple from the dates list
-        for parsed_date, date_str, date_pos in dates:
-            distance = abs(diag_pos - date_pos)
-            if distance > MAX_DISTANCE:
-                continue
-                
-            start_pos = max(0, min(diag_pos, date_pos) - 50)
-            end_pos = min(len(note), max(diag_pos, date_pos) + 100)
-            context = note[start_pos:end_pos]
-            context = preprocess_text(context)
-            
-            feature = {
-                'diagnosis': diagnosis,
-                'date': date_str, # Use raw date string here
-                'context': context,
-                'distance': distance,
-                'diag_pos_rel': diag_pos - start_pos,
-                'date_pos_rel': date_pos - start_pos,
-                'diag_before_date': 1 if diag_pos < date_pos else 0
-            }
-            features.append(feature)
-    
-    return features
-
-def create_prediction_dataset(features, vocab, device, max_distance, max_context_len):
-    """Convert preprocessed features into model-ready tensors"""
-    test_data = []
-    for feature in features:
-        # Convert words to indices
-        context_indices = []
-        for word in feature['context'].split():
-            if word in vocab.word2idx:
-                context_indices.append(vocab.word2idx[word])
-            else:
-                context_indices.append(vocab.word2idx['<unk>'])
-        
-        # Pad or truncate using max_context_len
-        if len(context_indices) > max_context_len:  
-            context_indices = context_indices[:max_context_len]
-        else:
-            padding = [0] * (max_context_len - len(context_indices))
-            context_indices.extend(padding)
-        
-        # Normalize distance using max_distance
-        distance = min(feature['distance'] / max_distance, 1.0)
-        
-        # Create tensor dict
-        tensor_dict = {
-            'context': torch.tensor(context_indices, dtype=torch.long).unsqueeze(0).to(device),
-            'distance': torch.tensor(distance, dtype=torch.float).unsqueeze(0).to(device),
-            'diag_before': torch.tensor(feature['diag_before_date'], dtype=torch.float).unsqueeze(0).to(device),
-            'feature': feature  # Keep original feature for reference
-        }
-        test_data.append(tensor_dict)
-    
-    return test_data

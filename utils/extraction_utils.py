@@ -7,12 +7,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import ConfusionMatrixDisplay
 import json
+import torch
 # Add tqdm for progress bars
 from tqdm import tqdm
 # Add pandas for CSV processing
 import pandas as pd
 # Add dotenv for OpenAI API keys
 from dotenv import load_dotenv
+
+# Import from training_utils to avoid circular imports
+from utils.training_utils import preprocess_text
 
 # Get the appropriate data path based on the config
 def get_data_path(config):
@@ -428,6 +432,122 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
         df.to_csv(dataset_path, index=False)
     
     return prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold
+
+# Inference-related functions moved from training_utils.py
+def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
+    """Preprocess features from a clinical note for prediction using pre-extracted entities.
+    
+    Args:
+        note (str): The clinical note text
+        diagnoses (list): List of (diagnosis, position) tuples
+        dates (list): List of (parsed_date, original_date, position) tuples
+        MAX_DISTANCE (int): Maximum distance between diagnosis and date to consider
+        
+    Returns:
+        list: List of feature dictionaries for each diagnosis-date pair
+    """
+    # Build features for each diagnosis-date pair
+    features = []
+    for diagnosis, diag_pos in diagnoses:
+        # Correctly unpack the 3-element tuple from the dates list
+        for parsed_date, date_str, date_pos in dates:
+            distance = abs(diag_pos - date_pos)
+            if distance > MAX_DISTANCE:
+                continue
+                
+            start_pos = max(0, min(diag_pos, date_pos) - 50)
+            end_pos = min(len(note), max(diag_pos, date_pos) + 100)
+            context = note[start_pos:end_pos]
+            context = preprocess_text(context)
+            
+            feature = {
+                'diagnosis': diagnosis,
+                'date': date_str, # Use raw date string here
+                'context': context,
+                'distance': distance,
+                'diag_pos_rel': diag_pos - start_pos,
+                'date_pos_rel': date_pos - start_pos,
+                'diag_before_date': 1 if diag_pos < date_pos else 0
+            }
+            features.append(feature)
+    
+    return features
+
+def create_prediction_dataset(features, vocab, device, max_distance, max_context_len):
+    """Convert preprocessed features into model-ready tensors
+    
+    Args:
+        features (list): List of feature dictionaries
+        vocab (Vocabulary): Vocabulary object with word2idx mapping
+        device (torch.device): Device to place tensors on
+        max_distance (int): Maximum distance value for normalization
+        max_context_len (int): Maximum context length for padding/truncation
+        
+    Returns:
+        list: List of tensor dictionaries ready for model input
+    """
+    test_data = []
+    for feature in features:
+        # Convert words to indices
+        context_indices = []
+        for word in feature['context'].split():
+            if word in vocab.word2idx:
+                context_indices.append(vocab.word2idx[word])
+            else:
+                context_indices.append(vocab.word2idx['<unk>'])
+        
+        # Pad or truncate using max_context_len
+        if len(context_indices) > max_context_len:  
+            context_indices = context_indices[:max_context_len]
+        else:
+            padding = [0] * (max_context_len - len(context_indices))
+            context_indices.extend(padding)
+        
+        # Normalize distance using max_distance
+        distance = min(feature['distance'] / max_distance, 1.0)
+        
+        # Create tensor dict
+        tensor_dict = {
+            'context': torch.tensor(context_indices, dtype=torch.long).unsqueeze(0).to(device),
+            'distance': torch.tensor(distance, dtype=torch.float).unsqueeze(0).to(device),
+            'diag_before': torch.tensor(feature['diag_before_date'], dtype=torch.float).unsqueeze(0).to(device),
+            'feature': feature  # Keep original feature for reference
+        }
+        test_data.append(tensor_dict)
+    
+    return test_data
+
+def predict_relationships(model, test_data):
+    """Use the model to predict relationships between diagnoses and dates
+    
+    Args:
+        model (DiagnosisDateRelationModel): Trained model
+        test_data (list): List of tensor dictionaries
+        
+    Returns:
+        list: List of relationship dictionaries with predictions
+    """
+    relationships = []
+    model.eval()
+    
+    with torch.no_grad():
+        for data in test_data:
+            # Get prediction
+            output = model(data['context'], data['distance'], data['diag_before'])
+            prob = output.item()
+            
+            # Get original feature
+            feature = data['feature']
+            
+            # Add to relationships if probability exceeds threshold
+            if prob > 0.5:  # Can adjust threshold as needed
+                relationships.append({
+                    'diagnosis': feature['diagnosis'],
+                    'date': feature['date'],
+                    'confidence': prob
+                })
+    
+    return relationships
 
 # Helper function to run extraction process for a given extractor and data
 def run_extraction(extractor, prepared_test_data):

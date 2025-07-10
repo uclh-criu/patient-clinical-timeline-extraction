@@ -3,7 +3,7 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used.
 # Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated'
-DATA_SOURCE = 'imaging'
+DATA_SOURCE = 'sample'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to extract
@@ -23,7 +23,7 @@ RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama'
-EXTRACTION_METHOD = 'naive'
+EXTRACTION_METHOD = 'custom'
 
 # Methods to include when running in 'compare' mode
 COMPARISON_METHODS = ['naive']

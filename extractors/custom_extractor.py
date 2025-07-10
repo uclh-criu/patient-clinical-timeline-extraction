@@ -4,7 +4,7 @@ from extractors.base_extractor import BaseRelationExtractor
 from model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
 from model_training.Vocabulary import Vocabulary
 from model_training.training_config import EMBEDDING_DIM, HIDDEN_DIM
-from utils.training_utils import preprocess_note_for_prediction, create_prediction_dataset
+from utils.extraction_utils import preprocess_note_for_prediction, create_prediction_dataset, predict_relationships
 
 class CustomExtractor(BaseRelationExtractor):
     """
@@ -45,8 +45,13 @@ class CustomExtractor(BaseRelationExtractor):
                 return False
             
             print(f"Loading vocabulary from: {self.vocab_path}")
-            with torch.serialization.safe_globals([Vocabulary]):
+            # Handle different PyTorch versions - safe_globals was removed in newer versions
+            try:
+                # Try the newer PyTorch approach
                 self.vocab = torch.load(self.vocab_path, weights_only=False)
+            except TypeError:
+                # For older PyTorch versions that don't have weights_only
+                self.vocab = torch.load(self.vocab_path)
             
             if not hasattr(self.vocab, 'n_words'):
                  print("Error: Loaded vocabulary object does not have 'n_words' attribute.")
@@ -72,13 +77,15 @@ class CustomExtractor(BaseRelationExtractor):
             self.vocab = None
             return False
     
-    def extract(self, text, entities=None):
+    def extract(self, text, entities=None, note_id=None, patient_id=None):
         """
         Extract relationships using the custom PyTorch model.
         
         Args:
             text (str): The clinical note text.
             entities (tuple, optional): A tuple of (entities_list, dates) if already extracted.
+            note_id (int, optional): The ID of the note being processed.
+            patient_id (str, optional): The ID of the patient the note belongs to.
             
         Returns:
             list: A list of dictionaries, each representing a relationship:
@@ -113,7 +120,10 @@ class CustomExtractor(BaseRelationExtractor):
                 entity_label, entity_pos = entity
                 diagnoses.append((entity_label, entity_pos, 'disorder'))  # Default category
         
-        features = preprocess_note_for_prediction(text, self.pred_max_distance)
+        # Extract just the position information needed for preprocess_note_for_prediction
+        diagnoses_for_model = [(d[0], d[1]) for d in diagnoses]
+        
+        features = preprocess_note_for_prediction(text, diagnoses_for_model, dates, self.pred_max_distance)
         # Pass the confirmed lists to the next function
         test_data = create_prediction_dataset(features, self.vocab, self.device, 
                                               self.pred_max_distance, self.pred_max_context_len)

@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
+import pandas as pd
 
 # Adjust relative paths for imports since train.py is in model_training/
 # Get the parent directory (project root)
@@ -20,10 +21,9 @@ from ClinicalNoteDataset import ClinicalNoteDataset
 import training_config 
 
 # Files from other top-level directories
-from data.synthetic_data_generator import generate_dataset
 from utils.training_utils import load_and_prepare_data
 from utils.training_utils import train_model, plot_training_curves
-from config import DEVICE, DATASET_PATH, MODEL_PATH, VOCAB_PATH 
+from config import DEVICE, MODEL_PATH, VOCAB_PATH
 
 def train():
     print(f"Using device: {DEVICE}")
@@ -35,25 +35,42 @@ def train():
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Step 1: Generate or load dataset
-    dataset_full_path = os.path.join(project_root, DATASET_PATH)
-    if os.path.exists(dataset_full_path):
-        print(f"Loading existing dataset from {dataset_full_path}")
-        with open(dataset_full_path, 'r') as f:
-            full_dataset = json.load(f)
+    # Step 1: Load synthetic data from CSV
+    synthetic_csv_path = os.path.join(project_root, 'data/synthetic.csv')
+    
+    if os.path.exists(synthetic_csv_path):
+        print(f"Loading synthetic data from CSV: {synthetic_csv_path}")
+        df = pd.read_csv(synthetic_csv_path)
+        
+        if 'note' not in df.columns:
+            print("Error: CSV file does not contain a 'note' column")
+            sys.exit(1)
             
-        # Calculate the split point without shuffling - use 80% for training
-        train_size = int(len(full_dataset) * 0.8)
-        # Use only the first 80% for training
-        dataset = full_dataset[:train_size]
-        print(f"Using first {train_size}/{len(full_dataset)} samples (80%) for training")
+        # Extract clinical notes from CSV
+        clinical_notes = df['note'].tolist()
+        print(f"Loaded {len(clinical_notes)} clinical notes from CSV")
+        
+        # Create dataset in the expected format for load_and_prepare_data
+        dataset = []
+        for i, row in df.iterrows():
+            # Parse the gold_standard JSON from the CSV
+            gold_standard = json.loads(row['gold_standard']) if 'gold_standard' in df.columns else []
+            
+            # Get pre-extracted disorders and dates
+            extracted_disorders = row['extracted_disorders'] if 'extracted_disorders' in df.columns else []
+            formatted_dates = row['formatted_dates'] if 'formatted_dates' in df.columns else []
+            
+            dataset.append({
+                'clinical_note': row['note'],
+                'ground_truth': gold_standard,
+                'extracted_disorders': extracted_disorders,
+                'formatted_dates': formatted_dates
+            })
+            
+        print(f"Created dataset with {len(dataset)} entries")
     else:
-        # Use NUM_SAMPLES from training_config
-        print(f"Generating synthetic clinical notes dataset with {training_config.NUM_SAMPLES} samples...") 
-        dataset = generate_dataset(num_notes=training_config.NUM_SAMPLES)
-        os.makedirs(os.path.dirname(dataset_full_path), exist_ok=True)
-        with open(dataset_full_path, 'w') as f:
-            json.dump(dataset, f, indent=2)
+        print(f"Error: Synthetic CSV not found at {synthetic_csv_path}")
+        sys.exit(1)
     
     print(f"Training dataset contains {len(dataset)} clinical notes")
     
