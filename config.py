@@ -3,7 +3,7 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used.
 # Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated'
-DATA_SOURCE = 'sample'
+DATA_SOURCE = 'imaging'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to extract

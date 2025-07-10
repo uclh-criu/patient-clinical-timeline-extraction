@@ -462,7 +462,7 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
             
             feature = {
                 'diagnosis': diagnosis,
-                'date': date_str, # Use raw date string here
+                'date': parsed_date, # Use parsed date instead of raw date string
                 'context': context,
                 'distance': distance,
                 'diag_pos_rel': diag_pos - start_pos,
