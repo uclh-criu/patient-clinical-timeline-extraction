@@ -32,6 +32,11 @@ COMPARISON_METHODS = ['naive']
 GENERATE_PATIENT_TIMELINES = False
 TIMELINE_OUTPUT_DIR = 'experiment_outputs/timelines'
 
+# --- Debug Settings --- #
+DEBUG_MODE = False  # Set to True for verbose logging during API calls and data processing
+MODEL_DEBUG_MODE = True  # Set to True to enable diagnostic prints in the model during inference
+NUM_TEST_SAMPLES = 5  # Number of samples to use for testing. Set to None to use all available samples.
+
 # --- Relative Date Extraction LLM Settings --- #
 ENABLE_RELATIVE_DATE_EXTRACTION = False      # Whether to extract relative dates
 RELATIVE_DATE_LLM_MODEL = 'openai'           # Which LLM to use: 'openai' or 'llama'
@@ -65,9 +70,6 @@ REAL_DATA_GOLD_COLUMN = 'relationship_gold'     # Column containing gold standar
 ENTITY_GOLD_COLUMN = 'entity_gold'                  # Gold standard for entities (NER task)
 RELATIONSHIP_GOLD_COLUMN = 'relationship_gold'      # Gold standard for relationships (RE task)
 PA_LIKELIHOOD_GOLD_COLUMN = 'pa_likelihood'         # Gold standard for PA likelihood prediction
-
-# --- Debug Settings --- #
-DEBUG_MODE = False  # Set to True for verbose logging during API calls and data processing
 
 # --- Processing Parameters (for prediction) --- #
 # Max char distance used by custom_extractor when finding candidate pairs

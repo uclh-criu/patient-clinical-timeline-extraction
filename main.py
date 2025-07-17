@@ -276,8 +276,8 @@ def evaluate_on_dataset():
     # Use get_data_path to determine the dataset path
     dataset_path = get_data_path(config)
     
-    # Use None to use all evaluation samples (the last 20% of dataset)
-    num_test_samples = None
+    # Use the NUM_TEST_SAMPLES from config instead of hardcoding to None
+    num_test_samples = config.NUM_TEST_SAMPLES
 
     # --- 1. Load and prepare data using the helper function, passing the config ---
     if config.ENTITY_MODE == 'disorder_only':

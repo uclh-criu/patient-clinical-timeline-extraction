@@ -446,19 +446,72 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
     Returns:
         list: List of feature dictionaries for each diagnosis-date pair
     """
+    # Import config here to avoid circular imports
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import config
+    
+    # Check if debug mode is enabled
+    debug_mode = getattr(config, 'MODEL_DEBUG_MODE', False)
+    
+    # DIAGNOSTIC: Print the raw input data
+    if debug_mode:
+        print("\n===== DIAGNOSTIC: PREPROCESS_NOTE_FOR_PREDICTION INPUT =====")
+        print(f"Number of diagnoses: {len(diagnoses)}")
+        print(f"Number of dates: {len(dates)}")
+        print(f"Max distance setting: {MAX_DISTANCE} words")
+        
+        # Sample the first few diagnoses and dates
+        if diagnoses:
+            print("\nSample diagnoses (first 3):")
+            for i, (diag, pos) in enumerate(diagnoses[:3]):
+                print(f"  {i+1}. '{diag}' at position {pos}")
+                # Show the text snippet around this diagnosis
+                start = max(0, pos - 20)
+                end = min(len(note), pos + 20)
+                snippet = note[start:end].replace('\n', ' ')
+                print(f"     Context: '...{snippet}...'")
+        
+        if dates:
+            print("\nSample dates (first 3):")
+            for i, (parsed_date, date_str, pos) in enumerate(dates[:3]):
+                print(f"  {i+1}. Original: '{date_str}', Parsed: '{parsed_date}', at position {pos}")
+                # Show the text snippet around this date
+                start = max(0, pos - 20)
+                end = min(len(note), pos + 20)
+                snippet = note[start:end].replace('\n', ' ')
+                print(f"     Context: '...{snippet}...'")
+    
     # Build features for each diagnosis-date pair
     features = []
+    pairs_considered = 0
+    pairs_within_distance = 0
+    
     for diagnosis, diag_pos in diagnoses:
         # Correctly unpack the 3-element tuple from the dates list
         for parsed_date, date_str, date_pos in dates:
+            pairs_considered += 1
             distance = abs(diag_pos - date_pos)
             if distance > MAX_DISTANCE:
                 continue
                 
+            pairs_within_distance += 1
             start_pos = max(0, min(diag_pos, date_pos) - 50)
             end_pos = min(len(note), max(diag_pos, date_pos) + 100)
             context = note[start_pos:end_pos]
             context = preprocess_text(context)
+            
+            # DIAGNOSTIC: Print detailed information about this candidate pair
+            if debug_mode and pairs_within_distance <= 3:  # Only print first 3 for brevity
+                print(f"\n--- Candidate Pair {pairs_within_distance} ---")
+                print(f"Diagnosis: '{diagnosis}' at position {diag_pos}")
+                print(f"Date: Original='{date_str}', Parsed='{parsed_date}' at position {date_pos}")
+                print(f"Distance: {distance} words")
+                print(f"Diagnosis before date: {'Yes' if diag_pos < date_pos else 'No'}")
+                print(f"Context window: [{start_pos}:{end_pos}] (length: {end_pos-start_pos})")
+                print(f"Raw context: '{note[start_pos:end_pos][:100]}...'")
+                print(f"Preprocessed context: '{context[:100]}...'")
             
             feature = {
                 'diagnosis': diagnosis,
@@ -470,6 +523,14 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
                 'diag_before_date': 1 if diag_pos < date_pos else 0
             }
             features.append(feature)
+    
+    # DIAGNOSTIC: Print summary statistics
+    if debug_mode:
+        print("\n===== DIAGNOSTIC: PREPROCESS_NOTE_FOR_PREDICTION SUMMARY =====")
+        print(f"Total diagnosis-date pairs considered: {pairs_considered}")
+        print(f"Pairs within max distance ({MAX_DISTANCE} words): {pairs_within_distance}")
+        print(f"Total features generated: {len(features)}")
+        print("==========================================================\n")
     
     return features
 
@@ -486,25 +547,79 @@ def create_prediction_dataset(features, vocab, device, max_distance, max_context
     Returns:
         list: List of tensor dictionaries ready for model input
     """
+    # Import config here to avoid circular imports
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import config
+    
+    # Check if debug mode is enabled
+    debug_mode = getattr(config, 'MODEL_DEBUG_MODE', False)
+    
+    # DIAGNOSTIC: Print the vectorization parameters
+    if debug_mode:
+        print("\n===== DIAGNOSTIC: CREATE_PREDICTION_DATASET =====")
+        print(f"Vocabulary size: {vocab.n_words}")
+        print(f"Max context length: {max_context_len}")
+        print(f"Max distance for normalization: {max_distance}")
+        print(f"Device: {device}")
+    
     test_data = []
-    for feature in features:
+    unknown_words_count = 0
+    total_words_count = 0
+    
+    # Process first 3 features in detail for diagnostics
+    detailed_diagnostics_count = min(3, len(features))
+    
+    for i, feature in enumerate(features):
+        # For the first few features, print detailed diagnostics
+        show_details = debug_mode and i < detailed_diagnostics_count
+        
+        if show_details:
+            print(f"\n--- Feature {i+1} Vectorization ---")
+            print(f"Diagnosis: '{feature['diagnosis']}'")
+            print(f"Date: '{feature['date']}'")
+            print(f"First 50 words of context: '{' '.join(feature['context'].split()[:50])}...'")
+        
         # Convert words to indices
         context_indices = []
+        feature_unknown_words = 0
+        feature_total_words = 0
+        
         for word in feature['context'].split():
+            feature_total_words += 1
+            total_words_count += 1
+            
             if word in vocab.word2idx:
                 context_indices.append(vocab.word2idx[word])
             else:
                 context_indices.append(vocab.word2idx['<unk>'])
+                feature_unknown_words += 1
+                unknown_words_count += 1
+        
+        if show_details:
+            print(f"Words in context: {feature_total_words}")
+            print(f"Unknown words: {feature_unknown_words} ({feature_unknown_words/feature_total_words*100:.1f}%)")
+            print(f"First 10 word indices: {context_indices[:10]}...")
         
         # Pad or truncate using max_context_len
+        original_length = len(context_indices)
         if len(context_indices) > max_context_len:  
             context_indices = context_indices[:max_context_len]
+            if show_details:
+                print(f"Context truncated from {original_length} to {max_context_len} tokens")
         else:
             padding = [0] * (max_context_len - len(context_indices))
             context_indices.extend(padding)
+            if show_details:
+                print(f"Context padded from {original_length} to {max_context_len} tokens")
         
         # Normalize distance using max_distance
         distance = min(feature['distance'] / max_distance, 1.0)
+        
+        if show_details:
+            print(f"Raw distance: {feature['distance']}, Normalized: {distance:.4f}")
+            print(f"Diagnosis before date: {feature['diag_before_date']}")
         
         # Create tensor dict
         tensor_dict = {
@@ -514,6 +629,15 @@ def create_prediction_dataset(features, vocab, device, max_distance, max_context
             'feature': feature  # Keep original feature for reference
         }
         test_data.append(tensor_dict)
+    
+    # DIAGNOSTIC: Print summary statistics
+    if debug_mode:
+        print("\n===== DIAGNOSTIC: CREATE_PREDICTION_DATASET SUMMARY =====")
+        print(f"Total features processed: {len(features)}")
+        print(f"Total words processed: {total_words_count}")
+        print(f"Unknown words encountered: {unknown_words_count} ({unknown_words_count/total_words_count*100:.1f}% of total)")
+        print(f"Test data tensors created: {len(test_data)}")
+        print("==========================================================\n")
     
     return test_data
 

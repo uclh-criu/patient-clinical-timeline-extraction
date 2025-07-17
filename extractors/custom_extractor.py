@@ -27,6 +27,7 @@ class CustomExtractor(BaseRelationExtractor):
         self.pred_max_context_len = getattr(config, 'PREDICTION_MAX_CONTEXT_LEN', 512)
         self.device = config.DEVICE
         self.name = "Custom (PyTorch NN)"
+        self.debug = getattr(config, 'MODEL_DEBUG_MODE', False)
         
         self.model = None
         self.vocab = None 
@@ -123,7 +124,43 @@ class CustomExtractor(BaseRelationExtractor):
         # Extract just the position information needed for preprocess_note_for_prediction
         diagnoses_for_model = [(d[0], d[1]) for d in diagnoses]
         
+        # DIAGNOSTIC: Print the extracted entities and dates
+        if self.debug:
+            print("\n===== DIAGNOSTIC: EXTRACTED ENTITIES AND DATES =====")
+            print(f"Number of diagnoses: {len(diagnoses_for_model)}")
+            for i, (label, pos) in enumerate(diagnoses_for_model[:5]):  # Show first 5
+                print(f"  Diagnosis {i+1}: '{label}' at position {pos}")
+                # Show the text snippet around this diagnosis
+                start = max(0, pos - 20)
+                end = min(len(text), pos + 20)
+                snippet = text[start:end].replace('\n', ' ')
+                print(f"     Context: '...{snippet}...'")
+            
+            print(f"Number of dates: {len(dates)}")
+            for i, (parsed_date, date_str, pos) in enumerate(dates[:5]):  # Show first 5
+                print(f"  Date {i+1}: '{date_str}' at position {pos}, parsed as '{parsed_date}'")
+                # Show the text snippet around this date
+                start = max(0, pos - 20)
+                end = min(len(text), pos + 20)
+                snippet = text[start:end].replace('\n', ' ')
+                print(f"     Context: '...{snippet}...'")
+        
         features = preprocess_note_for_prediction(text, diagnoses_for_model, dates, self.pred_max_distance)
+        
+        # DIAGNOSTIC: Print the generated features (candidate pairs)
+        if self.debug:
+            print("\n===== DIAGNOSTIC: GENERATED CANDIDATE PAIRS =====")
+            print(f"Number of candidate pairs: {len(features)}")
+            for i, feature in enumerate(features[:3]):  # Show first 3 pairs
+                print(f"\nCandidate Pair {i+1}:")
+                print(f"  Diagnosis: '{feature['diagnosis']}'")
+                print(f"  Date: '{feature['date']}'")
+                print(f"  Distance (words): {feature['distance']}")
+                print(f"  Diagnosis before date: {feature['diag_before']}")
+                print(f"  Context snippet (truncated): '{feature['context'][:100]}...'")
+            if len(features) > 3:
+                print(f"  ... and {len(features) - 3} more candidate pairs")
+        
         # Pass the confirmed lists to the next function
         test_data = create_prediction_dataset(features, self.vocab, self.device, 
                                               self.pred_max_distance, self.pred_max_context_len)
@@ -132,14 +169,32 @@ class CustomExtractor(BaseRelationExtractor):
         entity_predictions = {}
         self.model.eval()
         
+        if self.debug:
+            print("\n===== DIAGNOSTIC: MODEL PREDICTIONS =====")
+        
+        prediction_count = 0
+        
         with torch.no_grad():
             for data in test_data:
+                # DIAGNOSTIC: Print the input tensors (shapes and values)
+                if self.debug and prediction_count < 3:  # Only print first 3 for brevity
+                    print(f"\nPrediction {prediction_count + 1}:")
+                    print(f"  Context tensor shape: {data['context'].shape}")
+                    print(f"  Distance value: {data['distance'].item()}")
+                    print(f"  Diag_before value: {data['diag_before'].item()}")
+                
                 output = self.model(data['context'], data['distance'], data['diag_before'])
                 prob = output.item()
                 
                 feature = data['feature']
                 diagnosis = feature['diagnosis']
                 date = feature['date']
+                
+                # DIAGNOSTIC: Print the model's prediction
+                if self.debug and prediction_count < 3:  # Only print first 3 for brevity
+                    print(f"  Prediction for '{diagnosis}' and '{date}': {prob:.4f}")
+                
+                prediction_count += 1
                 
                 # Find the corresponding entity category
                 entity_category = 'disorder'  # Default
@@ -162,6 +217,10 @@ class CustomExtractor(BaseRelationExtractor):
         
         # For each entity, select the date with the highest confidence
         relationships = []
+        
+        if self.debug:
+            print("\n===== DIAGNOSTIC: FINAL RELATIONSHIP SELECTIONS =====")
+        
         for entity_key, predictions in entity_predictions.items():
             if predictions:
                 # Split the key back into label and category
@@ -170,6 +229,13 @@ class CustomExtractor(BaseRelationExtractor):
                 # Sort predictions by confidence (highest first)
                 best_prediction = max(predictions, key=lambda x: x['confidence'])
                 
+                # DIAGNOSTIC: Print the best prediction for each entity
+                if self.debug:
+                    print(f"Entity: '{entity_label}' ({entity_category})")
+                    print(f"  Best date: '{best_prediction['date']}' with confidence: {best_prediction['confidence']:.4f}")
+                    if len(predictions) > 1:
+                        print(f"  (Selected from {len(predictions)} candidate dates)")
+                
                 # Add the best prediction to our results
                 relationships.append({
                     'entity_label': entity_label,
@@ -177,5 +243,8 @@ class CustomExtractor(BaseRelationExtractor):
                     'date': best_prediction['date'],
                     'confidence': best_prediction['confidence']
                 })
+        
+        if self.debug:
+            print("\n===== END OF DIAGNOSTIC OUTPUT =====\n")
         
         return relationships 
