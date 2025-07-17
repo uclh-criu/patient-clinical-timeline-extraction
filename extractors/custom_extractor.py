@@ -156,7 +156,7 @@ class CustomExtractor(BaseRelationExtractor):
                 print(f"  Diagnosis: '{feature['diagnosis']}'")
                 print(f"  Date: '{feature['date']}'")
                 print(f"  Distance (words): {feature['distance']}")
-                print(f"  Diagnosis before date: {feature['diag_before']}")
+                print(f"  Diagnosis before date: {feature['diag_before_date']}")
                 print(f"  Context snippet (truncated): '{feature['context'][:100]}...'")
             if len(features) > 3:
                 print(f"  ... and {len(features) - 3} more candidate pairs")
