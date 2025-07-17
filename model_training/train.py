@@ -30,63 +30,77 @@ def train():
     
     # Ensure the training directory exists for outputs
     model_full_path = os.path.join(project_root, MODEL_PATH)
-    vocab_full_path = os.path.join(project_root, VOCAB_PATH) # Use updated config path
+    vocab_full_path = os.path.join(project_root, VOCAB_PATH)
     output_dir = os.path.dirname(model_full_path) 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Step 1: Load synthetic data from CSV
-    synthetic_csv_path = os.path.join(project_root, 'data/synthetic.csv')
-    
-    if os.path.exists(synthetic_csv_path):
-        print(f"Loading synthetic data from CSV: {synthetic_csv_path}")
-        df = pd.read_csv(synthetic_csv_path)
-        
-        if 'note' not in df.columns:
-            print("Error: CSV file does not contain a 'note' column")
-            sys.exit(1)
-            
-        # Extract clinical notes from CSV
-        clinical_notes = df['note'].tolist()
-        print(f"Loaded {len(clinical_notes)} clinical notes from CSV")
-        
-        # Create dataset in the expected format for load_and_prepare_data
-        dataset = []
-        for i, row in df.iterrows():
-            # Parse the gold_standard JSON from the CSV
-            gold_standard = json.loads(row['gold_standard']) if 'gold_standard' in df.columns else []
-            
-            # Get pre-extracted disorders and dates
-            extracted_disorders = row['extracted_disorders'] if 'extracted_disorders' in df.columns else []
-            formatted_dates = row['formatted_dates'] if 'formatted_dates' in df.columns else []
-            
-            dataset.append({
-                'clinical_note': row['note'],
-                'ground_truth': gold_standard,
-                'extracted_disorders': extracted_disorders,
-                'formatted_dates': formatted_dates
-            })
-            
-        print(f"Created dataset with {len(dataset)} entries")
-    else:
-        print(f"Error: Synthetic CSV not found at {synthetic_csv_path}")
+    # Check if vocabulary file exists - it should be built before training
+    if not os.path.exists(vocab_full_path):
+        print(f"Error: Vocabulary file not found at {vocab_full_path}")
+        print("Please run build_vocab.py first to create the vocabulary.")
         sys.exit(1)
     
-    print(f"Training dataset contains {len(dataset)} clinical notes")
+    # Load the pre-built vocabulary
+    print(f"Loading vocabulary from: {vocab_full_path}")
+    try:
+        # Handle different PyTorch versions
+        try:
+            # Try the newer PyTorch approach
+            vocab_instance = torch.load(vocab_full_path, weights_only=False)
+        except TypeError:
+            # For older PyTorch versions that don't have weights_only
+            vocab_instance = torch.load(vocab_full_path)
+            
+        print(f"Vocabulary loaded successfully. Size: {vocab_instance.n_words} words")
+    except Exception as e:
+        print(f"Error loading vocabulary: {e}")
+        sys.exit(1)
     
-    # Step 2: Prepare data for model training
+    # Step 1: Load training data from the path specified in training_config
+    training_data_path = os.path.join(project_root, training_config.TRAINING_DATA_PATH)
+    
+    if not os.path.exists(training_data_path):
+        print(f"Error: Training data file not found at {training_data_path}")
+        sys.exit(1)
+    
+    print(f"Loading training data from: {training_data_path}")
+    df = pd.read_csv(training_data_path)
+    
+    if 'note' not in df.columns:
+        print("Error: CSV file does not contain a 'note' column")
+        sys.exit(1)
+        
+    # Extract clinical notes from CSV
+    clinical_notes = df['note'].tolist()
+    print(f"Loaded {len(clinical_notes)} clinical notes from CSV")
+        
+    # Create dataset in the expected format for load_and_prepare_data
+    dataset = []
+    for i, row in df.iterrows():
+        # Parse the gold_standard JSON from the CSV
+        gold_standard = json.loads(row['gold_standard']) if 'gold_standard' in df.columns else []
+        
+        # Get pre-extracted disorders and dates
+        extracted_disorders = row['extracted_disorders'] if 'extracted_disorders' in df.columns else []
+        formatted_dates = row['formatted_dates'] if 'formatted_dates' in df.columns else []
+        
+        dataset.append({
+            'clinical_note': row['note'],
+            'ground_truth': gold_standard,
+            'extracted_disorders': extracted_disorders,
+            'formatted_dates': formatted_dates
+        })
+        
+    print(f"Created dataset with {len(dataset)} entries")
+    
+    # Step 2: Prepare data for model training (without building vocabulary)
     print("Loading and preparing data...")
-    # Use training_config settings here
-    features, labels, vocab_instance = load_and_prepare_data(
-        dataset, training_config.MAX_DISTANCE, Vocabulary
+    # Pass None as VocabClass to avoid building a new vocabulary
+    features, labels, _ = load_and_prepare_data(
+        dataset, training_config.MAX_DISTANCE, None
     )
-    print(f"Loaded {len(features)} examples with vocabulary size {vocab_instance.n_words}")
-    
-    # Save vocabulary to the path defined in config (now model_training/vocab.pt)
-    # Ensure the directory exists (it should as it's the same as output_dir)
-    os.makedirs(os.path.dirname(vocab_full_path), exist_ok=True)
-    torch.save(vocab_instance, vocab_full_path) 
-    print(f"Saved vocabulary to {vocab_full_path}")
+    print(f"Loaded {len(features)} examples")
     
     # Check class balance
     if len(labels) > 0:
@@ -95,10 +109,9 @@ def train():
         print(f"Class distribution: {positive} positive examples ({positive/len(labels)*100:.1f}%), {negative} negative examples ({negative/len(labels)*100:.1f}%)")
     else:
         print("Warning: No examples found in the dataset!")
-        sys.exit(1)  # Use sys.exit
+        sys.exit(1)
     
     # Step 3: Create train / val / test datasets 
-    # Note: These are splits within the training portion (80%) of the data
     train_features, val_features, train_labels, val_labels = train_test_split(
         features, labels, test_size=0.2, random_state=42
     )

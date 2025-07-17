@@ -1,5 +1,9 @@
 # Training Configuration for the Custom PyTorch Model
 
+# Data Sources
+VOCAB_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging_labelled.csv'  # Data to build vocabulary from
+TRAINING_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging_labelled.csv'  # Data to train model on
+
 # Model Architecture Parameters
 EMBEDDING_DIM = 128
 HIDDEN_DIM = 256
