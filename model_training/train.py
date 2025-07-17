@@ -78,8 +78,19 @@ def train():
     # Create dataset in the expected format for load_and_prepare_data
     dataset = []
     for i, row in df.iterrows():
-        # Parse the gold_standard JSON from the CSV
-        gold_standard = json.loads(row['gold_standard']) if 'gold_standard' in df.columns else []
+        # Parse the relationship_gold JSON from the CSV
+        relationship_gold = []
+        if 'relationship_gold' in df.columns:
+            try:
+                gold_data = row['relationship_gold']
+                if isinstance(gold_data, str) and gold_data.strip():
+                    # Find the first '[' which should be the start of the JSON array
+                    json_start = gold_data.find('[')
+                    if json_start >= 0:
+                        gold_data = gold_data[json_start:]
+                    relationship_gold = json.loads(gold_data)
+            except json.JSONDecodeError:
+                print(f"Warning: Could not parse relationship_gold for row {i}")
         
         # Get pre-extracted disorders and dates
         extracted_disorders = row['extracted_disorders'] if 'extracted_disorders' in df.columns else []
@@ -87,14 +98,13 @@ def train():
         
         dataset.append({
             'clinical_note': row['note'],
-            'ground_truth': gold_standard,
+            'relationship_gold': relationship_gold,
             'extracted_disorders': extracted_disorders,
             'formatted_dates': formatted_dates
         })
         
     print(f"Created dataset with {len(dataset)} entries")
     
-    # Step 2: Prepare data for model training (without building vocabulary)
     print("Loading and preparing data...")
     # Pass None as VocabClass to avoid building a new vocabulary
     features, labels, _ = load_and_prepare_data(

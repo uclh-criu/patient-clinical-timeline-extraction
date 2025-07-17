@@ -34,7 +34,7 @@ TIMELINE_OUTPUT_DIR = 'experiment_outputs/timelines'
 
 # --- Debug Settings --- #
 DEBUG_MODE = False  # Set to True for verbose logging during API calls and data processing
-MODEL_DEBUG_MODE = True  # Set to True to enable diagnostic prints in the model during inference
+MODEL_DEBUG_MODE = False  # Set to True to enable diagnostic prints in the model during training and inference
 NUM_TEST_SAMPLES = 5  # Number of samples to use for testing. Set to None to use all available samples.
 
 # --- Relative Date Extraction LLM Settings --- #

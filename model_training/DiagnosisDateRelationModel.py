@@ -41,16 +41,22 @@ class DiagnosisDateRelationModel(nn.Module):
         
         if self.debug:
             print("\n----- MODEL LAYER-BY-LAYER DIAGNOSTICS -----")
+            print(f"Batch size: {batch_size}")
             print(f"Input context shape: {context.shape}")
-            print(f"Input distance: {distance}")
-            print(f"Input diag_before: {diag_before}")
+            # Print only first few items for readability
+            if batch_size > 1:
+                print(f"Input distance (first 5 items): {distance[:5]}")
+                print(f"Input diag_before (first 5 items): {diag_before[:5]}")
+            else:
+                print(f"Input distance: {distance}")
+                print(f"Input diag_before: {diag_before}")
         
         # Embedding layer
         embedded = self.embedding(context)  # [batch_size, seq_len, embedding_dim]
         
         if self.debug:
             print(f"After embedding shape: {embedded.shape}")
-            print(f"Sample embedding values: {embedded[0, 0, :5]}...")  # First 5 values of first token
+            print(f"Sample embedding values (first item): {embedded[0, 0, :5]}...")  # First 5 values of first token
         
         # CNN layers (need to transpose for CNN)
         embedded = embedded.permute(0, 2, 1)  # [batch_size, embedding_dim, seq_len]
@@ -62,7 +68,7 @@ class DiagnosisDateRelationModel(nn.Module):
         
         if self.debug:
             print(f"After conv1 shape: {conv_output.shape}")
-            print(f"Sample conv1 values: {conv_output[0, 0, :5]}...")  # First 5 values of first channel
+            print(f"Sample conv1 values (first item): {conv_output[0, 0, :5]}...")  # First 5 values of first channel
         
         conv_output = self.pool(conv_output)
         
@@ -98,7 +104,7 @@ class DiagnosisDateRelationModel(nn.Module):
         
         if self.debug:
             print(f"After concatenating bidirectional hidden states: {hidden.shape}")
-            print(f"Sample hidden values: {hidden[0, :5]}...")  # First 5 values
+            print(f"Sample hidden values (first item): {hidden[0, :5]}...")  # First 5 values
         
         # Concatenate with distance and ordering features
         distance = distance.unsqueeze(1)  # [batch_size, 1]
@@ -109,8 +115,9 @@ class DiagnosisDateRelationModel(nn.Module):
             print(f"After adding distance and diag_before features: {combined.shape}")
             print(f"Combined feature vector (text + handcrafted features):")
             print(f"  - Text representation: {hidden.shape}")
-            print(f"  - Distance feature: {distance.item()}")
-            print(f"  - Diag_before feature: {diag_before.item()}")
+            # Print only the first item's values for batch processing
+            print(f"  - Distance feature (first item): {distance[0].item()}")
+            print(f"  - Diag_before feature (first item): {diag_before[0].item()}")
         
         # Fully connected layers
         output = F.relu(self.fc1(combined))
@@ -126,7 +133,10 @@ class DiagnosisDateRelationModel(nn.Module):
         
         if self.debug:
             print(f"Final output shape: {final_output.shape}")
-            print(f"Final prediction value: {final_output.item():.6f}")
+            # Print only the first item's prediction for batch processing
+            print(f"Final prediction value (first item): {final_output[0].item():.6f}")
+            if batch_size > 1:
+                print(f"Prediction range: {final_output.min().item():.6f} to {final_output.max().item():.6f}")
             print("----- END OF MODEL DIAGNOSTICS -----\n")
         
         return final_output

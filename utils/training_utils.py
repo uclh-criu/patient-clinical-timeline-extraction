@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import config # Import the config module
+import ast  # Add ast module for literal_eval
 
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,6 +20,27 @@ def preprocess_text(text):
     # Replace multiple spaces with single space
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
+
+# Add a helper function to sanitize strings with datetime objects
+def sanitize_datetime_strings(s):
+    """
+    Replace datetime.date objects in string with ISO format date strings
+    Example: datetime.date(2019, 4, 18) -> "2019-04-18"
+    """
+    if not isinstance(s, str):
+        return s
+        
+    # Pattern to match datetime.date(YYYY, MM, DD)
+    pattern = r'datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)'
+    
+    # Replace with "YYYY-MM-DD" format
+    def replace_date(match):
+        year = match.group(1)
+        month = match.group(2).zfill(2)  # Ensure 2 digits
+        day = match.group(3).zfill(2)    # Ensure 2 digits
+        return f'"{year}-{month}-{day}"'
+    
+    return re.sub(pattern, replace_date, s)
 
 # Load dataset, process, and convert to the format needed
 def load_and_prepare_data(file_or_dataset, MAX_DISTANCE, VocabClass=None):
@@ -50,11 +72,39 @@ def load_and_prepare_data(file_or_dataset, MAX_DISTANCE, VocabClass=None):
     total_notes = 0
     notes_with_entities = 0
     total_examples = 0
+    total_positive = 0
+    
+    print("\n===== DIAGNOSTICS FOR LABEL ASSIGNMENT =====")
+    print("This will help identify why we're not getting positive examples")
     
     for entry in dataset:
         total_notes += 1
         clinical_note = entry['clinical_note']
-        ground_truth = entry['ground_truth']
+        
+        # Get relationship_gold data
+        relationship_gold = entry.get('relationship_gold', [])
+        
+        # If it's a string, try to extract the JSON part
+        if isinstance(relationship_gold, str):
+            # Find the first '[' which should be the start of the JSON array
+            json_start = relationship_gold.find('[')
+            if json_start >= 0:
+                relationship_gold = relationship_gold[json_start:]
+                print(f"\n--- CLINICAL NOTE #{total_notes} ---")
+                print(f"Extracted JSON from relationship_gold: {relationship_gold[:50]}...")
+            
+            # Parse the JSON string
+            try:
+                # Sanitize and parse relationship_gold if it's a string
+                sanitized_gold = sanitize_datetime_strings(relationship_gold)
+                relationship_gold = json.loads(sanitized_gold)
+            except json.JSONDecodeError:
+                try:
+                    relationship_gold = ast.literal_eval(sanitized_gold)
+                except (ValueError, SyntaxError):
+                    # If parsing fails, use an empty list as fallback
+                    print(f"Warning: Could not parse relationship_gold: {relationship_gold[:100]}...")
+                    relationship_gold = []
         
         # Use pre-extracted disorders and dates if available
         extracted_disorders = entry.get('extracted_disorders', [])
@@ -63,35 +113,122 @@ def load_and_prepare_data(file_or_dataset, MAX_DISTANCE, VocabClass=None):
         # Convert extracted disorders to the format we need
         diagnoses = []
         if extracted_disorders:
-            for disorder in json.loads(extracted_disorders) if isinstance(extracted_disorders, str) else extracted_disorders:
-                if isinstance(disorder, dict):
-                    label = disorder.get('label', '')
-                    start = disorder.get('start', 0)
-                    diagnoses.append((label, start))
+            try:
+                # First try to parse as a list directly
+                if not isinstance(extracted_disorders, str):
+                    disorders_list = extracted_disorders
+                # Then try ast.literal_eval which handles both single and double quotes
+                elif extracted_disorders.strip():
+                    disorders_list = ast.literal_eval(extracted_disorders)
+                else:
+                    disorders_list = []
+                    
+                for disorder in disorders_list:
+                    if isinstance(disorder, dict):
+                        label = disorder.get('label', '')
+                        start = disorder.get('start', 0)
+                        diagnoses.append((label, start))
+            except (ValueError, SyntaxError) as e:
+                # If that fails, try json.loads as a fallback
+                try:
+                    if isinstance(extracted_disorders, str):
+                        disorders_list = json.loads(extracted_disorders)
+                        for disorder in disorders_list:
+                            if isinstance(disorder, dict):
+                                label = disorder.get('label', '')
+                                start = disorder.get('start', 0)
+                                diagnoses.append((label, start))
+                except json.JSONDecodeError:
+                    print(f"Warning: Could not parse extracted_disorders: {extracted_disorders[:100]}...")
+        
+        # Create a mapping from original date strings to parsed dates
+        date_mapping = {}
         
         # Convert formatted dates to the format we need
         dates = []
         if formatted_dates:
-            for date in json.loads(formatted_dates) if isinstance(formatted_dates, str) else formatted_dates:
-                if isinstance(date, dict):
-                    parsed = date.get('parsed', '')
-                    original = date.get('original', '')
-                    start = date.get('start', 0)
-                    dates.append((parsed, original, start))
+            try:
+                # First try to parse as a list directly
+                if not isinstance(formatted_dates, str):
+                    dates_list = formatted_dates
+                # For strings, sanitize datetime.date objects first
+                elif isinstance(formatted_dates, str):
+                    # Replace datetime.date objects with ISO format strings
+                    sanitized_dates = sanitize_datetime_strings(formatted_dates)
+                    
+                    if sanitized_dates.strip():
+                        try:
+                            # Try parsing the sanitized string
+                            dates_list = ast.literal_eval(sanitized_dates)
+                        except (ValueError, SyntaxError):
+                            # If that fails, try json.loads
+                            dates_list = json.loads(sanitized_dates)
+                    else:
+                        dates_list = []
+                else:
+                    dates_list = []
+                    
+                for date in dates_list:
+                    if isinstance(date, dict):
+                        # Handle both string dates and original datetime objects
+                        parsed = date.get('parsed', '')
+                        # If parsed is still a string representation of datetime.date, extract just the date
+                        if isinstance(parsed, str) and parsed.startswith('datetime.date'):
+                            # Extract YYYY-MM-DD from the string
+                            match = re.search(r'datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)', parsed)
+                            if match:
+                                year, month, day = match.groups()
+                                parsed = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                        
+                        original = date.get('original', '')
+                        start = date.get('start', 0)
+                        
+                        # Add to our date mapping - normalize by replacing slashes with hyphens
+                        if original and parsed:
+                            normalized_original = original.replace('/', '-')
+                            date_mapping[normalized_original] = parsed
+                        
+                        dates.append((parsed, original, start))
+            except Exception as e:
+                print(f"Warning: Could not parse formatted_dates: {formatted_dates[:100]}... Error: {str(e)}")
         
         if diagnoses and dates:
             notes_with_entities += 1
         
         # Create a ground truth mapping
         gt_relations = {}
-        for section in ground_truth:
-            section_date = section['date']
-            section_diagnoses = [diag['diagnosis'] for diag in section['diagnoses']]
+        for section in relationship_gold:
+            section_date = section.get('date', '')
+            section_diagnoses = [diag['diagnosis'] for diag in section.get('diagnoses', [])]
+            
+            # Normalize the date format using our mapping if available
+            normalized_section_date = section_date.replace('/', '-')
+            standardized_date = date_mapping.get(normalized_section_date, section_date)
             
             for diagnosis in section_diagnoses:
-                # Ground truth keys use normalized (lowercase, underscore) diagnosis and YYYY-MM-DD date
-                key = (diagnosis.strip().lower(), section_date.strip())
+                # Ground truth keys use normalized (lowercase, underscore) diagnosis and standardized date
+                key = (diagnosis.strip().lower(), standardized_date.strip())
                 gt_relations[key] = 1
+        
+        # Print ground truth relations for the first few notes
+        if total_notes <= 2 and gt_relations:
+            print(f"\n--- CLINICAL NOTE #{total_notes} ---")
+            print(f"Ground Truth Relations ({len(gt_relations)} total):")
+            for i, (key, _) in enumerate(gt_relations.items()):
+                if i < 10:  # Show only first 10 for brevity
+                    print(f"  {key}")
+                else:
+                    print(f"  ... and {len(gt_relations) - 10} more")
+                    break
+            
+            # Also print the date mapping for debugging
+            print("\nDate Mapping:")
+            for i, (original, parsed) in enumerate(date_mapping.items()):
+                if i < 10:  # Show only first 10 for brevity
+                    print(f"  '{original}' -> '{parsed}'")
+                else:
+                    print(f"  ... and {len(date_mapping) - 10} more")
+                    break
         
         # Build features and labels using actual ground truth
         features = []
@@ -131,17 +268,30 @@ def load_and_prepare_data(file_or_dataset, MAX_DISTANCE, VocabClass=None):
                 key = (diagnosis.strip().lower(), parsed_date) # Use the parsed_date here
                 label = 1 if key in gt_relations else 0
                 
+                # Print diagnostic info for the first few examples
+                if total_notes <= 2 and total_examples < 10:
+                    print(f"\nCandidate pair #{total_examples+1}:")
+                    print(f"  Diagnosis: '{diagnosis}' -> Normalized: '{diagnosis.strip().lower()}'")
+                    print(f"  Date: '{date_str}' -> Parsed: '{parsed_date}'")
+                    print(f"  Lookup key: {key}")
+                    print(f"  Found in ground truth: {key in gt_relations}")
+                    print(f"  Assigned label: {label}")
+                
                 features.append(feature)
                 labels.append(label)
                 total_examples += 1
+                if label == 1:
+                    total_positive += 1
         
         all_features.extend(features)
         all_labels.extend(labels)
     
     # Print debug info
+    print("\n===== SUMMARY =====")
     print(f"Processed {total_notes} clinical notes")
     print(f"Notes with entities: {notes_with_entities}/{total_notes}")
     print(f"Total examples generated: {total_examples}")
+    print(f"Positive examples: {total_positive}/{total_examples} ({total_positive/max(1,total_examples)*100:.1f}%)")
     
     # Return vocab instance only if it was created
     return all_features, all_labels, vocab if VocabClass else None
