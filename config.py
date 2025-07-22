@@ -16,17 +16,20 @@ OPENAI_MODEL = 'gpt-4o'
 # --- Llama Extractor Parameters --- #
 LLAMA_MODEL_PATH = './Llama-3.2-3B-Instruct'
 
+# --- BERT Extractor Parameters --- #
+BERT_MODEL_PATH = './model_training/bert_model'
+
 # --- Execution Settings --- #
 # Mode to run when main.py is executed.
 # Valid options: 'evaluate', 'compare'
 RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
-# Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama'
-EXTRACTION_METHOD = 'custom'
+# Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
+EXTRACTION_METHOD = 'naive'
 
 # Methods to include when running in 'compare' mode
-COMPARISON_METHODS = ['naive']
+COMPARISON_METHODS = ['naive', 'custom', 'bert']
 
 # Whether to generate patient timeline visualizations
 GENERATE_PATIENT_TIMELINES = False
@@ -34,7 +37,7 @@ TIMELINE_OUTPUT_DIR = 'experiment_outputs/timelines'
 
 # --- Debug Settings --- #
 DEBUG_MODE = False  # Set to True for verbose logging during API calls and data processing
-MODEL_DEBUG_MODE = False  # Set to True to enable diagnostic prints in the model during training and inference
+MODEL_DEBUG_MODE = True  # Set to True to enable diagnostic prints in the model during training and inference
 NUM_TEST_SAMPLES = 5  # Number of samples to use for testing. Set to None to use all available samples.
 
 # --- Relative Date Extraction LLM Settings --- #

@@ -3,13 +3,14 @@ from extractors.custom_extractor import CustomExtractor
 from extractors.relcat_extractor import RelcatExtractor
 from extractors.openai_extractor import OpenAIExtractor
 from extractors.llama_extractor import LlamaExtractor
+from extractors.bert_extractor import BertExtractor
 
 def create_extractor(method, config):
     """
     Factory function to create the appropriate relation extractor.
     
     Args:
-        method (str): The extraction method to use ('custom', 'naive', 'relcat', 'openai', or 'llama').
+        method (str): The extraction method to use ('custom', 'naive', 'relcat', 'openai', 'llama', or 'bert').
         config: The configuration object or dict.
         
     Returns:
@@ -30,6 +31,8 @@ def create_extractor(method, config):
         return OpenAIExtractor(config)
     elif method == 'llama':
         return LlamaExtractor(config)
+    elif method == 'bert':
+        return BertExtractor(config)
     else:
         raise ValueError(f"Unknown extraction method: {method}. " +
-                        "Valid options are: 'custom', 'naive', 'relcat', 'openai', or 'llama'.") 
+                        "Valid options are: 'custom', 'naive', 'relcat', 'openai', 'llama', or 'bert'.") 

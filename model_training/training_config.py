@@ -2,7 +2,7 @@
 
 # Data Sources
 VOCAB_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging_labelled.csv'  # Data to build vocabulary from
-TRAINING_DATA_PATH = 'data/synthetic.csv'  # Data to train model on
+TRAINING_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging_labelled.csv'  # Data to train model on
 
 # Model Architecture Parameters
 EMBEDDING_DIM = 128
@@ -21,3 +21,15 @@ MAX_CONTEXT_LEN = 512
 
 # Dataset Generation (if dataset needs to be created)
 NUM_SAMPLES = 100 # Number of synthetic notes to generate 
+
+# --- BERT Model Configuration --- #
+# BERT Training Data
+BERT_TRAINING_DATA_PATH = 'data/synthetic.csv'  # Data to train BERT model on
+
+# BERT Model Parameters
+BERT_PRETRAINED_MODEL = 'dmis-lab/biobert-base-cased-v1.1'
+BERT_MAX_SEQ_LENGTH = 512
+BERT_BATCH_SIZE = 8
+BERT_LEARNING_RATE = 2e-5
+BERT_NUM_TRAIN_EPOCHS = 3
+BERT_CONFIDENCE_THRESHOLD = 0.5 
