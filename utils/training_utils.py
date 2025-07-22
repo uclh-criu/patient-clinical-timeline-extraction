@@ -18,15 +18,8 @@ import ast  # Add ast module for literal_eval
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Clean and preprocess text for model input
-def preprocess_text(text):
-    # Convert to lowercase
-    text = text.lower()
-    # Replace special characters
-    text = re.sub(r'[^\w\s\.]', ' ', text)
-    # Replace multiple spaces with single space
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
+# Import preprocess_text from extraction_utils to avoid duplication
+from utils.extraction_utils import preprocess_text
 
 # Add a helper function to sanitize strings with datetime objects
 def sanitize_datetime_strings(s):
@@ -49,259 +42,14 @@ def sanitize_datetime_strings(s):
     
     return re.sub(pattern, replace_date, s)
 
-# Load dataset, process, and convert to the format needed
+# This function has been replaced by prepare_custom_training_data
+# which uses the canonical load_and_prepare_data from extraction_utils.py
 def load_and_prepare_data(file_or_dataset, MAX_DISTANCE, VocabClass=None):
     """
-    Loads and prepares data for model training.
-    
-    Args:
-        file_or_dataset: Either a file path to a JSON dataset or the dataset itself
-        MAX_DISTANCE: Maximum distance (in characters) between diagnosis and date to include
-        VocabClass: Optional vocabulary class to build vocabulary
-        
-    Returns:
-        tuple: (features, labels, vocab) - processed data and vocabulary instance
+    DEPRECATED: Use prepare_custom_training_data instead.
+    This function is kept for backward compatibility but will be removed in the future.
     """
-    # VocabClass is optional, only used if we need to build the vocab here
-    if isinstance(file_or_dataset, str):
-        # It's a file path
-        with open(file_or_dataset, 'r') as f:
-            dataset = json.load(f)
-    else:
-        # It's already a dataset
-        dataset = file_or_dataset
-    
-    all_features = []
-    all_labels = []
-    vocab = VocabClass() if VocabClass else None
-    
-    # Add debug counters
-    total_notes = 0
-    notes_with_entities = 0
-    total_examples = 0
-    total_positive = 0
-    
-    print("\n===== DIAGNOSTICS FOR LABEL ASSIGNMENT =====")
-    print("This will help identify why we're not getting positive examples")
-    
-    for entry in dataset:
-        total_notes += 1
-        clinical_note = entry['clinical_note']
-        
-        # Get relationship_gold data
-        relationship_gold = entry.get('relationship_gold', [])
-        
-        # If it's a string, try to extract the JSON part
-        if isinstance(relationship_gold, str):
-            # Find the first '[' which should be the start of the JSON array
-            json_start = relationship_gold.find('[')
-            if json_start >= 0:
-                relationship_gold = relationship_gold[json_start:]
-                print(f"\n--- CLINICAL NOTE #{total_notes} ---")
-                print(f"Extracted JSON from relationship_gold: {relationship_gold[:50]}...")
-            
-            # Parse the JSON string
-            try:
-                # Sanitize and parse relationship_gold if it's a string
-                sanitized_gold = sanitize_datetime_strings(relationship_gold)
-                relationship_gold = json.loads(sanitized_gold)
-            except json.JSONDecodeError:
-                try:
-                    relationship_gold = ast.literal_eval(sanitized_gold)
-                except (ValueError, SyntaxError):
-                    # If parsing fails, use an empty list as fallback
-                    print(f"Warning: Could not parse relationship_gold: {relationship_gold[:100]}...")
-                    relationship_gold = []
-        
-        # Use pre-extracted disorders and dates if available
-        extracted_disorders = entry.get('extracted_disorders', [])
-        formatted_dates = entry.get('formatted_dates', [])
-        
-        # Convert extracted disorders to the format we need
-        diagnoses = []
-        if extracted_disorders:
-            try:
-                # First try to parse as a list directly
-                if not isinstance(extracted_disorders, str):
-                    disorders_list = extracted_disorders
-                # Then try ast.literal_eval which handles both single and double quotes
-                elif extracted_disorders.strip():
-                    disorders_list = ast.literal_eval(extracted_disorders)
-                else:
-                    disorders_list = []
-                    
-                for disorder in disorders_list:
-                    if isinstance(disorder, dict):
-                        label = disorder.get('label', '')
-                        start = disorder.get('start', 0)
-                        diagnoses.append((label, start))
-            except (ValueError, SyntaxError) as e:
-                # If that fails, try json.loads as a fallback
-                try:
-                    if isinstance(extracted_disorders, str):
-                        disorders_list = json.loads(extracted_disorders)
-                        for disorder in disorders_list:
-                            if isinstance(disorder, dict):
-                                label = disorder.get('label', '')
-                                start = disorder.get('start', 0)
-                                diagnoses.append((label, start))
-                except json.JSONDecodeError:
-                    print(f"Warning: Could not parse extracted_disorders: {extracted_disorders[:100]}...")
-        
-        # Create a mapping from original date strings to parsed dates
-        date_mapping = {}
-        
-        # Convert formatted dates to the format we need
-        dates = []
-        if formatted_dates:
-            try:
-                # First try to parse as a list directly
-                if not isinstance(formatted_dates, str):
-                    dates_list = formatted_dates
-                # For strings, sanitize datetime.date objects first
-                elif isinstance(formatted_dates, str):
-                    # Replace datetime.date objects with ISO format strings
-                    sanitized_dates = sanitize_datetime_strings(formatted_dates)
-                    
-                    if sanitized_dates.strip():
-                        try:
-                            # Try parsing the sanitized string
-                            dates_list = ast.literal_eval(sanitized_dates)
-                        except (ValueError, SyntaxError):
-                            # If that fails, try json.loads
-                            dates_list = json.loads(sanitized_dates)
-                    else:
-                        dates_list = []
-                else:
-                    dates_list = []
-                    
-                for date in dates_list:
-                    if isinstance(date, dict):
-                        # Handle both string dates and original datetime objects
-                        parsed = date.get('parsed', '')
-                        # If parsed is still a string representation of datetime.date, extract just the date
-                        if isinstance(parsed, str) and parsed.startswith('datetime.date'):
-                            # Extract YYYY-MM-DD from the string
-                            match = re.search(r'datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)', parsed)
-                            if match:
-                                year, month, day = match.groups()
-                                parsed = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-                        
-                        original = date.get('original', '')
-                        start = date.get('start', 0)
-                        
-                        # Add to our date mapping - normalize by replacing slashes with hyphens
-                        if original and parsed:
-                            normalized_original = original.replace('/', '-')
-                            date_mapping[normalized_original] = parsed
-                        
-                        dates.append((parsed, original, start))
-            except Exception as e:
-                print(f"Warning: Could not parse formatted_dates: {formatted_dates[:100]}... Error: {str(e)}")
-        
-        if diagnoses and dates:
-            notes_with_entities += 1
-        
-        # Create a ground truth mapping
-        gt_relations = {}
-        for section in relationship_gold:
-            section_date = section.get('date', '')
-            section_diagnoses = [diag['diagnosis'] for diag in section.get('diagnoses', [])]
-            
-            # Normalize the date format using our mapping if available
-            normalized_section_date = section_date.replace('/', '-')
-            standardized_date = date_mapping.get(normalized_section_date, section_date)
-            
-            for diagnosis in section_diagnoses:
-                # Ground truth keys use normalized (lowercase, underscore) diagnosis and standardized date
-                key = (diagnosis.strip().lower(), standardized_date.strip())
-                gt_relations[key] = 1
-        
-        # Print ground truth relations for the first few notes
-        if total_notes <= 2 and gt_relations:
-            print(f"\n--- CLINICAL NOTE #{total_notes} ---")
-            print(f"Ground Truth Relations ({len(gt_relations)} total):")
-            for i, (key, _) in enumerate(gt_relations.items()):
-                if i < 10:  # Show only first 10 for brevity
-                    print(f"  {key}")
-                else:
-                    print(f"  ... and {len(gt_relations) - 10} more")
-                    break
-            
-            # Also print the date mapping for debugging
-            print("\nDate Mapping:")
-            for i, (original, parsed) in enumerate(date_mapping.items()):
-                if i < 10:  # Show only first 10 for brevity
-                    print(f"  '{original}' -> '{parsed}'")
-                else:
-                    print(f"  ... and {len(date_mapping) - 10} more")
-                    break
-        
-        # Build features and labels using actual ground truth
-        features = []
-        labels = []
-        
-        # Dates list now contains (parsed_date, raw_date_str, date_pos)
-        for diagnosis, diag_pos in diagnoses:
-            for parsed_date, date_str, date_pos in dates:
-                distance = abs(diag_pos - date_pos)
-                
-                # Skip if too far apart
-                if distance > MAX_DISTANCE:
-                    continue
-                    
-                # Process the context
-                start_pos = max(0, min(diag_pos, date_pos) - 50)
-                end_pos = min(len(clinical_note), max(diag_pos, date_pos) + 100)
-                context = clinical_note[start_pos:end_pos]
-                context = preprocess_text(context)
-                
-                # Add to vocab if building one
-                if vocab:
-                    vocab.add_sentence(context)
-                
-                # Create feature (using raw date_str for context)
-                feature = {
-                    'diagnosis': diagnosis, 
-                    'date': date_str, # Keep original raw date string for feature context
-                    'context': context,
-                    'distance': distance,
-                    'diag_pos_rel': diag_pos - start_pos,
-                    'date_pos_rel': date_pos - start_pos,
-                    'diag_before_date': 1 if diag_pos < date_pos else 0
-                }
-                
-                # Look up in ground truth relations using normalized diagnosis and parsed date
-                key = (diagnosis.strip().lower(), parsed_date) # Use the parsed_date here
-                label = 1 if key in gt_relations else 0
-                
-                # Print diagnostic info for the first few examples
-                if total_notes <= 2 and total_examples < 10:
-                    print(f"\nCandidate pair #{total_examples+1}:")
-                    print(f"  Diagnosis: '{diagnosis}' -> Normalized: '{diagnosis.strip().lower()}'")
-                    print(f"  Date: '{date_str}' -> Parsed: '{parsed_date}'")
-                    print(f"  Lookup key: {key}")
-                    print(f"  Found in ground truth: {key in gt_relations}")
-                    print(f"  Assigned label: {label}")
-                
-                features.append(feature)
-                labels.append(label)
-                total_examples += 1
-                if label == 1:
-                    total_positive += 1
-        
-        all_features.extend(features)
-        all_labels.extend(labels)
-    
-    # Print debug info
-    print("\n===== SUMMARY =====")
-    print(f"Processed {total_notes} clinical notes")
-    print(f"Notes with entities: {notes_with_entities}/{total_notes}")
-    print(f"Total examples generated: {total_examples}")
-    print(f"Positive examples: {total_positive}/{total_examples} ({total_positive/max(1,total_examples)*100:.1f}%)")
-    
-    # Return vocab instance only if it was created
-    return all_features, all_labels, vocab if VocabClass else None
+    return prepare_custom_training_data(file_or_dataset, MAX_DISTANCE, VocabClass)
 
 # Training function
 def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, device, model_save_path):
@@ -391,7 +139,7 @@ def plot_training_curves(train_losses, val_losses, val_accs, save_path, show_plo
         save_path: Path to save the plot
         show_plot: Whether to display the plot (default: False)
     """
-    # Check if save_path needs to be modified to include _training_curves.png
+        # Check if save_path needs to be modified to include _training_curves.png
     if not save_path.endswith('.png'):
         dir_path = os.path.dirname(save_path)
         base_name = os.path.splitext(os.path.basename(save_path))[0]
@@ -431,320 +179,529 @@ def plot_training_curves(train_losses, val_losses, val_accs, save_path, show_plo
 
 def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length):
     """
-    Load and prepare data for training the BERT model.
+    Prepare data for training the BERT model.
     
     Args:
         csv_path: Path to the CSV dataset
-        pretrained_model_name: Name of the pretrained model for tokenization
+        pretrained_model_name: Name or path of the pretrained BERT model
         max_seq_length: Maximum sequence length for tokenization
         
     Returns:
-        tuple: (train_dataset, val_dataset, tokenizer)
+        tuple: (train_dataset, val_dataset, tokenizer) - datasets and tokenizer
     """
-    print(f"Loading data from {csv_path}...")
+    import os
+    from model_training.BertEntityPairDataset import BertEntityPairDataset
     
-    # Load the CSV file
-    df = pd.read_csv(csv_path)
+    # Import the canonical load_and_prepare_data function
+    from utils.extraction_utils import load_and_prepare_data
+    
+    # Ensure config has the necessary attributes for BERT training
+    if not hasattr(config, 'RELATIONSHIP_GOLD_COLUMN'):
+        setattr(config, 'RELATIONSHIP_GOLD_COLUMN', 'relationship_gold')
+    if not hasattr(config, 'REAL_DATA_DATES_COLUMN'):
+        setattr(config, 'REAL_DATA_DATES_COLUMN', 'formatted_dates')
+    if not hasattr(config, 'ENTITY_MODE'):
+        setattr(config, 'ENTITY_MODE', 'disorder_only')
+    if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):
+        setattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION', False)
+    
+    # Load the data using the canonical function
+    # Handle different return signatures based on ENTITY_MODE
+    result = load_and_prepare_data(csv_path, None, config)
+    
+    # In disorder_only mode, load_and_prepare_data returns only 2 values
+    # In multi_entity mode, it returns 4 values
+    if len(result) == 2:
+        prepared_data, relationship_gold = result
+    else:
+        prepared_data, _, relationship_gold, _ = result
+    
+    if not prepared_data:
+        print("Error: Failed to load data for BERT training.")
+        return None, None, None
     
     # Initialize tokenizer
+    print(f"Loading tokenizer: {pretrained_model_name}")
     tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name)
     
     # Add special tokens for entity marking
     special_tokens = {'additional_special_tokens': ['[E1]', '[/E1]', '[E2]', '[/E2]']}
     tokenizer.add_special_tokens(special_tokens)
     
-    # Process each row to create examples
-    all_examples = []
+    # Create a mapping of gold standard relationships for quick lookup
+    gold_relationships = set()
+    for rel in relationship_gold:
+        # Handle both disorder_only and multi_entity modes
+        if 'diagnosis' in rel:
+            gold_relationships.add((rel['note_id'], rel['diagnosis'].lower(), rel['date']))
+        elif 'entity_label' in rel:
+            gold_relationships.add((rel['note_id'], rel['entity_label'].lower(), rel['date']))
     
-    for i, row in tqdm(df.iterrows(), total=len(df), desc="Processing notes"):
-        # Get the text
-        text = row.get(config.REAL_DATA_TEXT_COLUMN, '')
-        if not text or pd.isna(text):
+    print(f"Found {len(gold_relationships)} gold standard relationships")
+    
+    # Create entity pairs for BERT training
+    entity_pairs = []
+    
+    for note_entry in prepared_data:
+        note_id = note_entry['note_id']
+        text = note_entry['note']
+        entities_list, dates = note_entry['entities']
+        
+        # Skip if either entities or dates are empty
+        if not entities_list or not dates:
             continue
+        
+        # Process each entity-date pair
+        for entity in entities_list:
+            # Handle both dict and tuple formats for entities
+            if isinstance(entity, dict):
+                entity_label = entity.get('label', '')
+                entity_start = entity.get('start', 0)
+                entity_end = entity.get('end', entity_start + len(entity_label))
+                entity_category = entity.get('category', 'disorder')
+            else:
+                # Legacy format: (label, position)
+                entity_label, entity_start = entity
+                entity_end = entity_start + len(entity_label)
+                entity_category = 'disorder'  # Default category for legacy format
             
-        # Get relationship gold data
-        relationship_gold = row.get('relationship_gold', '')
-        if isinstance(relationship_gold, str) and relationship_gold:
-            # Find the first '[' which should be the start of the JSON array
-            json_start = relationship_gold.find('[')
-            if json_start >= 0:
-                relationship_gold = relationship_gold[json_start:]
+            for date_tuple in dates:
+                # Unpack the date tuple: (parsed_date, raw_date_str, position)
+                parsed_date, date_str, date_start = date_tuple
+                date_end = date_start + len(date_str)
                 
-            # Parse the JSON string
-            try:
-                # Sanitize and parse relationship_gold if it's a string
-                sanitized_gold = sanitize_datetime_strings(relationship_gold)
-                gold_data = json.loads(sanitized_gold)
-            except json.JSONDecodeError:
-                try:
-                    gold_data = eval(sanitized_gold)
-                except (ValueError, SyntaxError):
-                    gold_data = []
-        else:
-            gold_data = []
-            
-        # Create a set of gold standard relationships
-        gold_relationships = set()
-        for rel in gold_data:
-            if isinstance(rel, dict):
-                if 'entity_label' in rel and 'date' in rel:
-                    gold_relationships.add((rel['entity_label'].lower(), rel['date']))
-                elif 'diagnosis' in rel and 'date' in rel:
-                    # Legacy format
-                    gold_relationships.add((rel['diagnosis'].lower(), rel['date']))
-                    
-        # Get extracted entities
-        extracted_disorders = row.get('extracted_disorders', '')
-        if isinstance(extracted_disorders, str) and extracted_disorders:
-            try:
-                from utils.extraction_utils import transform_python_to_json
-                disorders_json = transform_python_to_json(extracted_disorders)
-                disorders_list = json.loads(disorders_json)
-            except (json.JSONDecodeError, ValueError, SyntaxError):
-                disorders_list = []
-        else:
-            disorders_list = []
-            
-        # Get extracted dates
-        formatted_dates = row.get('formatted_dates', '')
-        if isinstance(formatted_dates, str) and formatted_dates:
-            try:
-                from utils.extraction_utils import transform_python_to_json
-                dates_json = transform_python_to_json(formatted_dates)
-                dates_list = json.loads(dates_json)
-            except (json.JSONDecodeError, ValueError, SyntaxError):
-                dates_list = []
-        else:
-            dates_list = []
-            
-        # Skip if no entities or dates
-        if not disorders_list or not dates_list:
-            continue
-            
-        # Process disorders
-        disorders = []
-        for disorder in disorders_list:
-            if isinstance(disorder, dict):
-                label = disorder.get('label', '')
-                start = disorder.get('start', 0)
-                end = start + len(label) if 'end' not in disorder else disorder.get('end')
-                category = disorder.get('category', 'disorder')
-                
-                if label and start >= 0:
-                    disorders.append({
-                        'label': label.lower(),
-                        'start': start,
-                        'end': end,
-                        'category': category
-                    })
-                    
-        # Process dates
-        dates = []
-        for date in dates_list:
-            if isinstance(date, dict):
-                parsed = date.get('parsed', '')
-                original = date.get('original', '')
-                start = date.get('start', 0)
-                end = start + len(original) if original else start
-                
-                if parsed and original and start >= 0:
-                    dates.append({
-                        'parsed': parsed,
-                        'original': original,
-                        'start': start,
-                        'end': end
-                    })
-                    
-        # Create examples for all possible pairs
-        for disorder in disorders:
-            for date in dates:
-                # Check if this is a positive example
-                is_positive = (disorder['label'], date['parsed']) in gold_relationships
-                
-                # Skip if entities overlap
-                if (disorder['start'] <= date['start'] and disorder['end'] >= date['end']) or \
-                   (date['start'] <= disorder['start'] and date['end'] >= disorder['end']):
-                    continue
-                    
-                # Create marked text
-                marked_text = list(text)
-                
-                # Insert markers in reverse order (end to start) to avoid changing positions
-                if disorder['start'] > date['start']:
-                    # Date is first
-                    marked_text.insert(disorder['end'], "[/E1]")
-                    marked_text.insert(disorder['start'], "[E1]")
-                    marked_text.insert(date['end'], "[/E2]")
-                    marked_text.insert(date['start'], "[E2]")
-                else:
-                    # Disorder is first
-                    marked_text.insert(date['end'], "[/E2]")
-                    marked_text.insert(date['start'], "[E2]")
-                    marked_text.insert(disorder['end'], "[/E1]")
-                    marked_text.insert(disorder['start'], "[E1]")
-                    
-                marked_text = ''.join(marked_text)
-                
-                # Get context window around the entities
-                min_pos = min(disorder['start'], date['start'])
-                max_pos = max(disorder['end'], date['end'])
-                
-                # Get a window of text that includes both entities plus context
-                context_start = max(0, min_pos - 200)
-                context_end = min(len(text), max_pos + 200)
-                context = marked_text[context_start:context_end]
-                
-                # Calculate character distance between entities
-                dist1 = abs(disorder['start'] - date['end'])
-                dist2 = abs(date['start'] - disorder['end'])
-                char_distance = min(dist1, dist2)
-                
-                # Create example
-                example = {
-                    'text': context,
-                    'disorder': disorder['label'],
-                    'date': date['parsed'],
-                    'distance': char_distance / 1000.0,  # Normalize distance
-                    'label': 1 if is_positive else 0
+                # Create entity dictionaries
+                entity_dict = {
+                    'text': entity_label,
+                    'start': entity_start,
+                    'end': entity_end,
+                    'category': entity_category
                 }
                 
-                all_examples.append(example)
+                date_dict = {
+                    'text': date_str,
+                    'start': date_start,
+                    'end': date_end,
+                    'parsed': parsed_date
+                }
                 
-    print(f"Created {len(all_examples)} examples")
+                # Check if this is a gold standard relationship
+                is_gold = False
+                if (note_id, entity_label.lower(), parsed_date) in gold_relationships:
+                    is_gold = True
+                
+                # Add to entity pairs
+                entity_pairs.append({
+                    'text': text,
+                    'entity1': entity_dict,
+                    'entity2': date_dict,
+                    'label': 1 if is_gold else 0
+                })
     
-    # Count positive and negative examples
-    positive_count = sum(1 for ex in all_examples if ex['label'] == 1)
-    negative_count = len(all_examples) - positive_count
-    print(f"Positive examples: {positive_count} ({positive_count/len(all_examples)*100:.1f}%)")
-    print(f"Negative examples: {negative_count} ({negative_count/len(all_examples)*100:.1f}%)")
+    print(f"Created {len(entity_pairs)} entity pairs for training")
     
-    # Handle class imbalance by downsampling negative examples if needed
-    if negative_count > 2 * positive_count:
-        print("Downsampling negative examples...")
-        positive_examples = [ex for ex in all_examples if ex['label'] == 1]
-        negative_examples = [ex for ex in all_examples if ex['label'] == 0]
+    # Check class balance
+    positive = sum(1 for pair in entity_pairs if pair['label'] == 1)
+    negative = len(entity_pairs) - positive
+    print(f"Class distribution: {positive} positive examples ({positive/len(entity_pairs)*100:.1f}%), "
+          f"{negative} negative examples ({negative/len(entity_pairs)*100:.1f}%)")
+    
+    # Balance the dataset if needed (downsample negative examples)
+    if negative > 5 * positive:  # If negative examples are more than 5x positive ones
+        import random
+        print("Downsampling negative examples to balance the dataset...")
+        positive_pairs = [pair for pair in entity_pairs if pair['label'] == 1]
+        negative_pairs = [pair for pair in entity_pairs if pair['label'] == 0]
         
-        # Sample twice as many negative examples as positive ones
-        sampled_negative = random.sample(negative_examples, min(2 * positive_count, negative_count))
-        balanced_examples = positive_examples + sampled_negative
-        random.shuffle(balanced_examples)
+        # Keep all positive examples and randomly sample negative examples
+        sampled_negative = random.sample(negative_pairs, min(len(negative_pairs), 5 * len(positive_pairs)))
+        entity_pairs = positive_pairs + sampled_negative
         
-        all_examples = balanced_examples
-        print(f"After balancing: {len(all_examples)} examples")
-        print(f"Positive examples: {len(positive_examples)} ({len(positive_examples)/len(all_examples)*100:.1f}%)")
-        print(f"Negative examples: {len(sampled_negative)} ({len(sampled_negative)/len(all_examples)*100:.1f}%)")
+        # Shuffle the pairs
+        random.shuffle(entity_pairs)
+        
+        # Print new class balance
+        positive = sum(1 for pair in entity_pairs if pair['label'] == 1)
+        negative = len(entity_pairs) - positive
+        print(f"New class distribution: {positive} positive examples ({positive/len(entity_pairs)*100:.1f}%), "
+              f"{negative} negative examples ({negative/len(entity_pairs)*100:.1f}%)")
+    
+    # Create dataset
+    dataset = BertEntityPairDataset.create_from_pairs(entity_pairs, tokenizer, max_seq_length)
     
     # Split into train and validation sets
-    train_examples, val_examples = train_test_split(all_examples, test_size=0.2, random_state=42, 
-                                                   stratify=[ex['label'] for ex in all_examples])
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
     
-    print(f"Train set: {len(train_examples)} examples")
-    print(f"Validation set: {len(val_examples)} examples")
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        dataset, [train_size, val_size]
+    )
     
-    # Import BertEntityPairDataset here to avoid circular imports
-    from model_training.BertEntityPairDataset import BertEntityPairDataset
-    
-    # Create datasets
-    train_dataset = BertEntityPairDataset(train_examples, tokenizer, max_length=max_seq_length)
-    val_dataset = BertEntityPairDataset(val_examples, tokenizer, max_length=max_seq_length)
+    print(f"Split into {len(train_dataset)} training examples and {len(val_dataset)} validation examples")
     
     return train_dataset, val_dataset, tokenizer
 
 def train_bert_model(model, train_loader, val_loader, optimizer, scheduler, num_epochs, device, model_path):
     """
-    Train the BERT model for relation extraction.
+    Train the BERT model for entity-date relationship extraction.
     
     Args:
-        model: The BERT model to train
+        model: The BERT model
         train_loader: DataLoader for training data
         val_loader: DataLoader for validation data
         optimizer: Optimizer for training
         scheduler: Learning rate scheduler
         num_epochs: Number of training epochs
-        device: Device to train on (cuda or cpu)
-        model_path: Path to save the best model
+        device: Device to train on
+        model_path: Path to save the model
         
     Returns:
-        tuple: (train_losses, val_losses, val_accuracies) - Lists of training losses, validation losses and validation accuracies
+        tuple: (train_losses, val_losses, val_accuracies)
     """
-    # Training loop
-    best_val_accuracy = 0
+    from tqdm import tqdm
+    import numpy as np
+    import os
+    
+    # Initialize lists to store metrics
     train_losses = []
     val_losses = []
     val_accuracies = []
     
+    # Initialize best validation accuracy
+    best_val_accuracy = 0.0
+    
+    # Training loop
     for epoch in range(num_epochs):
-        print(f"Epoch {epoch+1}/{num_epochs}")
+        print(f"\nEpoch {epoch+1}/{num_epochs}")
         
-        # Training
+        # Training phase
         model.train()
-        train_loss = 0
+        total_train_loss = 0
+        train_steps = 0
         
+        # Use tqdm for progress bar
         progress_bar = tqdm(train_loader, desc="Training")
+        
         for batch in progress_bar:
             # Move batch to device
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['label'].long().to(device)  # Convert to long for CrossEntropyLoss
+            batch = {k: v.to(device) for k, v in batch.items()}
+            
+            # Clear gradients
+            optimizer.zero_grad()
             
             # Forward pass
-            optimizer.zero_grad()
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-            loss = outputs.loss
+            outputs = model(**{k: v for k, v in batch.items() if k != 'label'})
+            logits = outputs.logits
+            
+            # Calculate loss
+            loss = torch.nn.BCEWithLogitsLoss()(logits.view(-1), batch['label'])
             
             # Backward pass
             loss.backward()
+            
+            # Clip gradients
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            
+            # Update parameters
             optimizer.step()
             scheduler.step()
             
-            train_loss += loss.item()
-            progress_bar.set_postfix({'loss': loss.item()})
+            # Update metrics
+            total_train_loss += loss.item()
+            train_steps += 1
             
-        avg_train_loss = train_loss / len(train_loader)
+            # Update progress bar
+            progress_bar.set_postfix({'loss': loss.item()})
+        
+        # Calculate average training loss
+        avg_train_loss = total_train_loss / train_steps
         train_losses.append(avg_train_loss)
+        
         print(f"Average training loss: {avg_train_loss:.4f}")
         
-        # Validation
-        model.eval()
-        correct = 0
-        total = 0
-        val_loss = 0
-        
-        with torch.no_grad():
-            for batch in tqdm(val_loader, desc="Validation"):
-                input_ids = batch['input_ids'].to(device)
-                attention_mask = batch['attention_mask'].to(device)
-                labels = batch['label'].long().to(device)
-                
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                loss = outputs.loss
-                val_loss += loss.item()
-                
-                logits = outputs.logits
-                predictions = torch.argmax(logits, dim=1)
-                correct += (predictions == labels).sum().item()
-                total += labels.size(0)
-                
-        val_accuracy = correct / total
-        avg_val_loss = val_loss / len(val_loader)
-        val_accuracies.append(val_accuracy)
-        val_losses.append(avg_val_loss)
-        print(f"Validation accuracy: {val_accuracy:.4f}")
-        print(f"Average validation loss: {avg_val_loss:.4f}")
-        
-        # Save best model
-        if val_accuracy > best_val_accuracy:
-            best_val_accuracy = val_accuracy
-            print(f"New best validation accuracy: {best_val_accuracy:.4f}")
+        # Validation phase
+        if val_loader:
+            model.eval()
+            total_val_loss = 0
+            val_steps = 0
+            correct = 0
+            total = 0
             
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            with torch.no_grad():
+                for batch in tqdm(val_loader, desc="Validation"):
+                    # Move batch to device
+                    batch = {k: v.to(device) for k, v in batch.items()}
+                    
+                    # Forward pass
+                    outputs = model(**{k: v for k, v in batch.items() if k != 'label'})
+                    logits = outputs.logits
+                    
+                    # Calculate loss
+                    loss = torch.nn.BCEWithLogitsLoss()(logits.view(-1), batch['label'])
+                    
+                    # Update metrics
+                    total_val_loss += loss.item()
+                    val_steps += 1
+                    
+                    # Calculate accuracy
+                    predictions = (torch.sigmoid(logits.view(-1)) > 0.5).float()
+                    correct += (predictions == batch['label']).sum().item()
+                    total += len(batch['label'])
             
-            # Save model and tokenizer
-            model.save_pretrained(model_path)
-            print(f"Model saved to {model_path}")
+            # Calculate average validation loss and accuracy
+            avg_val_loss = total_val_loss / val_steps
+            val_losses.append(avg_val_loss)
+            
+            val_accuracy = correct / total * 100
+            val_accuracies.append(val_accuracy)
+            
+            print(f"Validation loss: {avg_val_loss:.4f}")
+            print(f"Validation accuracy: {val_accuracy:.2f}%")
+            
+            # Save the best model
+            if val_accuracy > best_val_accuracy:
+                best_val_accuracy = val_accuracy
+                print(f"New best validation accuracy: {best_val_accuracy:.4f}")
+                
+                # Create directory if it doesn't exist
+                os.makedirs(os.path.dirname(model_path), exist_ok=True)
+                
+                # Save model and tokenizer
+                model.save_pretrained(model_path)
+                print(f"Model saved to {model_path}")
     
     return train_losses, val_losses, val_accuracies
 
 # plot_bert_training_curves has been consolidated with plot_training_curves
+
+def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class=None):
+    """
+    Prepare data for training the custom model.
+    
+    Args:
+        dataset_path_or_data: Either a file path to a CSV dataset or the dataset itself
+        max_distance: Maximum distance (in characters) between diagnosis and date to include
+        vocab_class: Optional vocabulary class to build vocabulary
+        
+    Returns:
+        tuple: (features, labels, vocab) - processed data and vocabulary instance
+    """
+    from utils.extraction_utils import load_and_prepare_data as canonical_load
+    from utils.extraction_utils import preprocess_note_for_prediction, transform_python_to_json
+    
+    # Initialize vocabulary if needed
+    vocab = vocab_class() if vocab_class else None
+    
+    if isinstance(dataset_path_or_data, str):
+        # It's a file path, use the canonical function to load it
+        print(f"Loading data from file: {dataset_path_or_data}")
+        
+        # Make sure we have the necessary config attributes for training
+        if not hasattr(config, 'RELATIONSHIP_GOLD_COLUMN'):
+            setattr(config, 'RELATIONSHIP_GOLD_COLUMN', 'relationship_gold')
+        if not hasattr(config, 'REAL_DATA_DATES_COLUMN'):
+            setattr(config, 'REAL_DATA_DATES_COLUMN', 'formatted_dates')
+        if not hasattr(config, 'ENTITY_MODE'):
+            setattr(config, 'ENTITY_MODE', 'disorder_only')
+        if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):
+            setattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION', False)
+            
+        # Handle different return signatures based on ENTITY_MODE
+        result = canonical_load(dataset_path_or_data, None, config)
+        
+        # In disorder_only mode, load_and_prepare_data returns only 2 values
+        # In multi_entity mode, it returns 4 values
+        if len(result) == 2:
+            prepared_data, relationship_gold = result
+            entity_gold = None
+            pa_likelihood_gold = None
+        else:
+            prepared_data, entity_gold, relationship_gold, pa_likelihood_gold = result
+        
+        if not prepared_data:
+            print("Error: Failed to load data for training.")
+            return [], [], vocab
+    else:
+        # It's already a dataset, process it directly
+        print("Processing in-memory dataset")
+        prepared_data = []
+        relationship_gold = []
+        
+        for i, entry in enumerate(dataset_path_or_data):
+            clinical_note = entry['clinical_note']
+            
+            # Get relationship_gold data and convert to canonical format
+            gold_data = entry.get('relationship_gold', [])
+            if isinstance(gold_data, str):
+                # Find the first '[' which should be the start of the JSON array
+                json_start = gold_data.find('[')
+                if json_start >= 0:
+                    gold_data = gold_data[json_start:]
+                
+                # Parse the JSON string
+                try:
+                    # Sanitize and parse gold_data if it's a string
+                    sanitized_gold = sanitize_datetime_strings(gold_data)
+                    gold_data = json.loads(sanitized_gold)
+                except json.JSONDecodeError:
+                    try:
+                        gold_data = ast.literal_eval(sanitized_gold)
+                    except (ValueError, SyntaxError):
+                        gold_data = []
+            
+            # Process gold data into canonical format
+            for rel in gold_data:
+                if isinstance(rel, dict):
+                    if 'entity_label' in rel and 'date' in rel:
+                        relationship_gold.append({
+                            'note_id': i,
+                            'patient_id': entry.get('patient_id'),
+                            'entity_label': rel['entity_label'].lower(),
+                            'entity_category': rel.get('entity_category', 'disorder'),
+                            'date': rel['date']
+                        })
+                    elif 'diagnosis' in rel and 'date' in rel:
+                        # Legacy format
+                        relationship_gold.append({
+                            'note_id': i,
+                            'patient_id': entry.get('patient_id'),
+                            'entity_label': rel['diagnosis'].lower(),
+                            'entity_category': 'disorder',  # Default for legacy format
+                            'date': rel['date']
+                        })
+            
+            # Process extracted entities
+            extracted_disorders = entry.get('extracted_disorders', [])
+            formatted_dates = entry.get('formatted_dates', [])
+            
+            # Convert to the format expected by preprocess_note_for_prediction
+            disorders = []
+            dates = []
+            
+            # Process disorders
+            if extracted_disorders:
+                try:
+                    # Handle different formats
+                    if isinstance(extracted_disorders, list):
+                        disorders_list = extracted_disorders
+                    elif isinstance(extracted_disorders, str) and extracted_disorders.strip():
+                        disorders_json = transform_python_to_json(extracted_disorders)
+                        disorders_list = json.loads(disorders_json)
+                    else:
+                        disorders_list = []
+                        
+                    for disorder in disorders_list:
+                        if isinstance(disorder, dict):
+                            label = disorder.get('label', '')
+                            start = disorder.get('start', 0)
+                            disorders.append((label, start))
+                except Exception as e:
+                    print(f"Warning: Could not parse extracted_disorders: {e}")
+            
+            # Process dates
+            if formatted_dates:
+                try:
+                    # Handle different formats
+                    if isinstance(formatted_dates, list):
+                        dates_list = formatted_dates
+                    elif isinstance(formatted_dates, str) and formatted_dates.strip():
+                        dates_json = transform_python_to_json(formatted_dates)
+                        dates_list = json.loads(dates_json)
+                    else:
+                        dates_list = []
+                        
+                    for date in dates_list:
+                        if isinstance(date, dict):
+                            parsed = date.get('parsed', '')
+                            original = date.get('original', '')
+                            start = date.get('start', 0)
+                            dates.append((parsed, original, start))
+                except Exception as e:
+                    print(f"Warning: Could not parse formatted_dates: {e}")
+            
+            # Add to prepared data
+            prepared_data.append({
+                'patient_id': entry.get('patient_id'),
+                'note_id': i,
+                'note': clinical_note,
+                'entities': (disorders, dates)
+            })
+    
+    # Create a set of gold standard relationships for quick lookup
+    gold_relationships = set()
+    for rel in relationship_gold:
+        gold_relationships.add((rel['entity_label'].lower(), rel['date']))
+    
+    # Print detailed diagnostic information about the data
+    print("\n===== DETAILED DATA DIAGNOSTICS =====")
+    print(f"Found {len(gold_relationships)} gold standard relationships")
+    print(f"Found {len(prepared_data)} notes with entity data")
+    
+    # Show sample of the relationship_gold data
+    print("\nSample of raw relationship_gold data:")
+    if relationship_gold and len(relationship_gold) > 0:
+        for i, rel in enumerate(relationship_gold[:3]):
+            print(f"  {i+1}. {rel}")
+    
+    # Show sample of the parsed entities
+    print("\nSample of parsed entities:")
+    if prepared_data and len(prepared_data) > 0:
+        sample_note = prepared_data[0]
+        disorders, dates = sample_note['entities']
+        
+        print(f"  Disorders ({len(disorders)}):")
+        for i, disorder in enumerate(disorders[:5]):
+            print(f"    {i+1}. {disorder}")
+            
+        print(f"  Dates ({len(dates)}):")
+        for i, date in enumerate(dates[:5]):
+            print(f"    {i+1}. {date}")
+    else:
+        print("  No entities found in prepared data")
+    
+    # Show sample of gold relationships
+    if gold_relationships:
+        print("\nSample gold relationships (first 5):")
+        for i, (entity, date) in enumerate(list(gold_relationships)[:5]):
+            print(f"  {i+1}. Entity: '{entity}', Date: '{date}'")
+    else:
+        print("\nWARNING: No gold standard relationships found. Check your data format.")
+    
+    # Generate features and labels
+    all_features = []
+    all_labels = []
+    total_examples = 0
+    total_positive = 0
+    
+    for note_entry in prepared_data:
+        note_text = note_entry['note']
+        disorders, dates = note_entry['entities']
+        
+        # Generate features using preprocess_note_for_prediction
+        note_features = preprocess_note_for_prediction(note_text, disorders, dates, max_distance)
+        
+        # Assign labels based on gold relationships
+        for feature in note_features:
+            diagnosis = feature['diagnosis']
+            parsed_date = feature['date']
+            context = feature['context']
+            
+            # Add to vocab if building one
+            if vocab:
+                vocab.add_sentence(context)
+            
+            # Look up in gold relationships
+            key = (diagnosis.strip().lower(), parsed_date)
+            label = 1 if key in gold_relationships else 0
+            
+            all_features.append(feature)
+            all_labels.append(label)
+            total_examples += 1
+            if label == 1:
+                total_positive += 1
+    
+    # Print debug info
+    print(f"Generated {total_examples} examples")
+    print(f"Positive examples: {total_positive}/{total_examples} ({total_positive/max(1,total_examples)*100:.1f}%)")
+    
+    return all_features, all_labels, vocab

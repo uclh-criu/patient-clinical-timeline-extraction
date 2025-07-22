@@ -11,35 +11,22 @@ import re
 from extractors.extractor_factory import create_extractor
 import config
 
-# Dynamically import the appropriate extraction_utils module based on ENTITY_MODE
-if config.ENTITY_MODE == 'disorder_only':
-    from utils.extraction_utils_disorder_only import (
-        calculate_and_report_metrics,
-        load_and_prepare_data,
-        run_extraction,
-        get_data_path,
-        transform_python_to_json,
-        extract_relative_dates_llm,
-        aggregate_predictions_by_patient,
-        generate_patient_timelines,
-        generate_patient_timeline_summary
-    )
-else:  # 'multi_entity' mode
-    from utils.extraction_utils import (
-        calculate_and_report_metrics,
-        load_and_prepare_data,
-        run_extraction,
-        get_data_path,
-        transform_python_to_json,
-        extract_relative_dates_llm,
-        aggregate_predictions_by_patient,
-        generate_patient_timelines,
-        generate_patient_timeline_summary,
-        calculate_entity_metrics,
-        calculate_relationship_metrics,
-        predict_pa_likelihood,
-        calculate_likelihood_metrics
-    )
+# Import from unified extraction_utils module
+from utils.extraction_utils import (
+    calculate_and_report_metrics,
+    load_and_prepare_data,
+    run_extraction,
+    get_data_path,
+    transform_python_to_json,
+    extract_relative_dates_llm,
+    aggregate_predictions_by_patient,
+    generate_patient_timelines,
+    generate_patient_timeline_summary,
+    calculate_entity_metrics,
+    calculate_relationship_metrics,
+    predict_pa_likelihood,
+    calculate_likelihood_metrics
+)
 
 # Define the output directory using absolute path if project_root is available
 if 'project_root' not in locals() and 'project_root' not in globals():
@@ -280,6 +267,7 @@ def evaluate_on_dataset():
     num_test_samples = config.NUM_TEST_SAMPLES
 
     # --- 1. Load and prepare data using the helper function, passing the config ---
+    # The unified load_and_prepare_data function handles both modes
     if config.ENTITY_MODE == 'disorder_only':
         # In disorder_only mode, load_and_prepare_data returns only 2 values
         prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
@@ -380,56 +368,95 @@ def evaluate_on_dataset():
         note_predictions = {}
         note_correctness = {}
         
+        # Determine if we're in disorder_only mode
+        disorder_only_mode = (config.ENTITY_MODE == 'disorder_only')
+        
         # Group predictions by note_id
         for pred in all_predictions:
             note_id = pred['note_id']
             if note_id not in note_predictions:
                 note_predictions[note_id] = []
             
+            # Create a prediction object with only the necessary fields
+            pred_obj = {
+                'date': pred['date'],
+                'confidence': pred.get('confidence', 1.0)
+            }
+            
             # Handle different field names between disorder_only and multi_entity modes
-            if config.ENTITY_MODE == 'disorder_only':
-                note_predictions[note_id].append({
-                    'diagnosis': pred['diagnosis'],  # disorder_only mode uses 'diagnosis'
-                    'date': pred['date'],
-                    'confidence': pred.get('confidence', 1.0)
-                })
+            if disorder_only_mode:
+                # In disorder_only mode, use 'diagnosis' field
+                if 'diagnosis' in pred:
+                    pred_obj['diagnosis'] = pred['diagnosis']
+                elif 'entity_label' in pred:
+                    # Fall back to entity_label if diagnosis is not available
+                    pred_obj['diagnosis'] = pred['entity_label']
             else:
-                note_predictions[note_id].append({
-                    'entity_label': pred['entity_label'],  # multi_entity mode uses 'entity_label'
-                    'entity_category': pred.get('entity_category', 'unknown'),
-                    'date': pred['date'],
-                    'confidence': pred.get('confidence', 1.0)
-                })
+                # In multi_entity mode, use 'entity_label' and 'entity_category' fields
+                if 'entity_label' in pred:
+                    pred_obj['entity_label'] = pred['entity_label']
+                    if 'entity_category' in pred:
+                        pred_obj['entity_category'] = pred['entity_category']
+                    else:
+                        pred_obj['entity_category'] = 'unknown'
+                elif 'diagnosis' in pred:
+                    # Fall back to diagnosis if entity_label is not available
+                    pred_obj['entity_label'] = pred['diagnosis']
+                    pred_obj['entity_category'] = 'disorder'
+            
+            # Add the prediction object to the list for this note
+            note_predictions[note_id].append(pred_obj)
         
         # Check correctness if relationship gold standard exists
         if relationship_gold:
             # Convert gold_standard to a set for easier comparison
-            if config.ENTITY_MODE == 'disorder_only':
-                # In disorder_only mode, gold standard has 'diagnosis' field
-                gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in relationship_gold)
+            gold_set = set()
+            for g in relationship_gold:
+                if disorder_only_mode:
+                    # In disorder_only mode, gold standard has 'diagnosis' field
+                    if 'diagnosis' in g:
+                        gold_set.add((g['note_id'], g['diagnosis'], g['date']))
+                    elif 'entity_label' in g:
+                        # Fall back to entity_label if diagnosis is not available
+                        gold_set.add((g['note_id'], g['entity_label'], g['date']))
+                else:
+                    # In multi_entity mode, gold standard has 'entity_label' and 'entity_category' fields
+                    if 'entity_label' in g and 'entity_category' in g:
+                        gold_set.add((g['note_id'], g['entity_label'], g['entity_category'], g['date']))
+                    elif 'entity_label' in g:
+                        gold_set.add((g['note_id'], g['entity_label'], g['date']))
+                    elif 'diagnosis' in g:
+                        # Fall back to diagnosis if entity_label is not available
+                        gold_set.add((g['note_id'], g['diagnosis'], 'disorder', g['date']))
+            
+            # Check each prediction against the gold standard
+            for pred in all_predictions:
+                note_id = pred['note_id']
                 
-                # Check each prediction against the gold standard
-                for pred in all_predictions:
-                    note_id = pred['note_id']
-                    is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
-                    
-                    if note_id not in note_correctness:
-                        note_correctness[note_id] = []
-                        
-                    note_correctness[note_id].append(is_correct)
-            else:
-                # In multi_entity mode, gold standard has 'entity_label' and 'entity_category' fields
-                gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
+                if disorder_only_mode:
+                    # In disorder_only mode
+                    if 'diagnosis' in pred:
+                        is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
+                    elif 'entity_label' in pred:
+                        is_correct = (note_id, pred['entity_label'], pred['date']) in gold_set
+                    else:
+                        is_correct = False
+                else:
+                    # In multi_entity mode
+                    if 'entity_label' in pred and 'entity_category' in pred:
+                        is_correct = (note_id, pred['entity_label'], pred['entity_category'], pred['date']) in gold_set
+                    elif 'entity_label' in pred:
+                        is_correct = (note_id, pred['entity_label'], pred['date']) in gold_set
+                    elif 'diagnosis' in pred:
+                        is_correct = (note_id, pred['diagnosis'], 'disorder', pred['date']) in gold_set or \
+                                     (note_id, pred['diagnosis'], pred['date']) in gold_set
+                    else:
+                        is_correct = False
                 
-                # Check each prediction against the gold standard
-                for pred in all_predictions:
-                    note_id = pred['note_id']
-                    is_correct = (note_id, pred['entity_label'], pred.get('entity_category', 'unknown'), pred['date']) in gold_set
+                if note_id not in note_correctness:
+                    note_correctness[note_id] = []
                     
-                    if note_id not in note_correctness:
-                        note_correctness[note_id] = []
-                        
-                    note_correctness[note_id].append(is_correct)
+                note_correctness[note_id].append(is_correct)
         
         # Add predictions to dataframe
         df[predictions_column] = None
@@ -463,6 +490,8 @@ def evaluate_on_dataset():
             
     except Exception as e:
         print(f"Error saving predictions to CSV: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Generate patient timelines if configured
     if config.GENERATE_PATIENT_TIMELINES:
@@ -523,6 +552,7 @@ def compare_all_methods():
     print(f"Using dataset: {dataset_path}")
 
     # Load and prepare data once using the helper function, passing the config
+    # The unified load_and_prepare_data function handles both modes
     if config.ENTITY_MODE == 'disorder_only':
         # In disorder_only mode, load_and_prepare_data returns only 2 values
         prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
@@ -582,6 +612,9 @@ def compare_all_methods():
     except Exception as e:
         print(f"Warning: Could not load original CSV for saving predictions: {e}")
         original_df = None
+    
+    # Determine if we're in disorder_only mode
+    disorder_only_mode = (config.ENTITY_MODE == 'disorder_only')
     
     with tqdm(total=len(extractors_to_compare), desc="Comparing methods", unit="method") as pbar:
         for extractor in extractors_to_compare:
@@ -673,49 +706,86 @@ def compare_all_methods():
                     if note_id not in note_predictions:
                         note_predictions[note_id] = []
                     
+                    # Create a prediction object with only the necessary fields
+                    pred_obj = {
+                        'date': pred['date'],
+                        'confidence': pred.get('confidence', 1.0)
+                    }
+                    
                     # Handle different field names between disorder_only and multi_entity modes
-                    if config.ENTITY_MODE == 'disorder_only':
-                        note_predictions[note_id].append({
-                            'diagnosis': pred['diagnosis'],  # disorder_only mode uses 'diagnosis'
-                            'date': pred['date'],
-                            'confidence': pred.get('confidence', 1.0)
-                        })
+                    if disorder_only_mode:
+                        # In disorder_only mode, use 'diagnosis' field
+                        if 'diagnosis' in pred:
+                            pred_obj['diagnosis'] = pred['diagnosis']
+                        elif 'entity_label' in pred:
+                            # Fall back to entity_label if diagnosis is not available
+                            pred_obj['diagnosis'] = pred['entity_label']
                     else:
-                        note_predictions[note_id].append({
-                            'entity_label': pred['entity_label'],  # multi_entity mode uses 'entity_label'
-                            'entity_category': pred.get('entity_category', 'unknown'),
-                            'date': pred['date'],
-                            'confidence': pred.get('confidence', 1.0)
-                        })
+                        # In multi_entity mode, use 'entity_label' and 'entity_category' fields
+                        if 'entity_label' in pred:
+                            pred_obj['entity_label'] = pred['entity_label']
+                            if 'entity_category' in pred:
+                                pred_obj['entity_category'] = pred['entity_category']
+                            else:
+                                pred_obj['entity_category'] = 'unknown'
+                        elif 'diagnosis' in pred:
+                            # Fall back to diagnosis if entity_label is not available
+                            pred_obj['entity_label'] = pred['diagnosis']
+                            pred_obj['entity_category'] = 'disorder'
+                    
+                    # Add the prediction object to the list for this note
+                    note_predictions[note_id].append(pred_obj)
                 
                 # Check correctness if gold standard exists
                 if relationship_gold:
-                    if config.ENTITY_MODE == 'disorder_only':
-                        # In disorder_only mode, gold standard has 'diagnosis' field
-                        gold_set = set((g['note_id'], g['diagnosis'], g['date']) for g in relationship_gold)
+                    # Convert gold_standard to a set for easier comparison
+                    gold_set = set()
+                    for g in relationship_gold:
+                        if disorder_only_mode:
+                            # In disorder_only mode, gold standard has 'diagnosis' field
+                            if 'diagnosis' in g:
+                                gold_set.add((g['note_id'], g['diagnosis'], g['date']))
+                            elif 'entity_label' in g:
+                                # Fall back to entity_label if diagnosis is not available
+                                gold_set.add((g['note_id'], g['entity_label'], g['date']))
+                        else:
+                            # In multi_entity mode, gold standard has 'entity_label' and 'entity_category' fields
+                            if 'entity_label' in g and 'entity_category' in g:
+                                gold_set.add((g['note_id'], g['entity_label'], g['entity_category'], g['date']))
+                            elif 'entity_label' in g:
+                                gold_set.add((g['note_id'], g['entity_label'], g['date']))
+                            elif 'diagnosis' in g:
+                                # Fall back to diagnosis if entity_label is not available
+                                gold_set.add((g['note_id'], g['diagnosis'], 'disorder', g['date']))
+                    
+                    # Check each prediction against the gold standard
+                    for pred in all_predictions:
+                        note_id = pred['note_id']
                         
-                        # Check each prediction against the gold standard
-                        for pred in all_predictions:
-                            note_id = pred['note_id']
-                            is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
-                            
-                            if note_id not in note_correctness:
-                                note_correctness[note_id] = []
-                                
-                            note_correctness[note_id].append(is_correct)
-                    else:
-                        # In multi_entity mode, gold standard has 'entity_label' and 'entity_category' fields
-                        gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in relationship_gold)
+                        if disorder_only_mode:
+                            # In disorder_only mode
+                            if 'diagnosis' in pred:
+                                is_correct = (note_id, pred['diagnosis'], pred['date']) in gold_set
+                            elif 'entity_label' in pred:
+                                is_correct = (note_id, pred['entity_label'], pred['date']) in gold_set
+                            else:
+                                is_correct = False
+                        else:
+                            # In multi_entity mode
+                            if 'entity_label' in pred and 'entity_category' in pred:
+                                is_correct = (note_id, pred['entity_label'], pred['entity_category'], pred['date']) in gold_set
+                            elif 'entity_label' in pred:
+                                is_correct = (note_id, pred['entity_label'], pred['date']) in gold_set
+                            elif 'diagnosis' in pred:
+                                is_correct = (note_id, pred['diagnosis'], 'disorder', pred['date']) in gold_set or \
+                                             (note_id, pred['diagnosis'], pred['date']) in gold_set
+                            else:
+                                is_correct = False
                         
-                        # Check each prediction against the gold standard
-                        for pred in all_predictions:
-                            note_id = pred['note_id']
-                            is_correct = (note_id, pred['entity_label'], pred.get('entity_category', 'unknown'), pred['date']) in gold_set
+                        if note_id not in note_correctness:
+                            note_correctness[note_id] = []
                             
-                            if note_id not in note_correctness:
-                                note_correctness[note_id] = []
-                                
-                            note_correctness[note_id].append(is_correct)
+                        note_correctness[note_id].append(is_correct)
                 
                 # Add predictions to dataframe
                 original_df[predictions_column] = None
@@ -750,6 +820,8 @@ def compare_all_methods():
             print(f"Successfully saved all predictions to {dataset_path}")
         except Exception as e:
             print(f"Error saving predictions to CSV: {e}")
+            import traceback
+            traceback.print_exc()
     
     # Print final comparison summary
     print("\n=== FINAL COMPARISON SUMMARY ===")

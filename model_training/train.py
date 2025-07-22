@@ -1,12 +1,10 @@
 import os
 import sys
-import json
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
-import pandas as pd
 
 # Adjust relative paths for imports since train.py is in model_training/
 # Get the parent directory (project root)
@@ -21,7 +19,7 @@ from ClinicalNoteDataset import ClinicalNoteDataset
 import training_config 
 
 # Files from other top-level directories
-from utils.training_utils import load_and_prepare_data
+from utils.training_utils import prepare_custom_training_data
 from utils.training_utils import train_model, plot_training_curves
 from config import DEVICE, MODEL_PATH, VOCAB_PATH
 
@@ -65,50 +63,12 @@ def train():
         sys.exit(1)
     
     print(f"Loading training data from: {training_data_path}")
-    df = pd.read_csv(training_data_path)
     
-    if 'note' not in df.columns:
-        print("Error: CSV file does not contain a 'note' column")
-        sys.exit(1)
-        
-    # Extract clinical notes from CSV
-    clinical_notes = df['note'].tolist()
-    print(f"Loaded {len(clinical_notes)} clinical notes from CSV")
-        
-    # Create dataset in the expected format for load_and_prepare_data
-    dataset = []
-    for i, row in df.iterrows():
-        # Parse the relationship_gold JSON from the CSV
-        relationship_gold = []
-        if 'relationship_gold' in df.columns:
-            try:
-                gold_data = row['relationship_gold']
-                if isinstance(gold_data, str) and gold_data.strip():
-                    # Find the first '[' which should be the start of the JSON array
-                    json_start = gold_data.find('[')
-                    if json_start >= 0:
-                        gold_data = gold_data[json_start:]
-                    relationship_gold = json.loads(gold_data)
-            except json.JSONDecodeError:
-                print(f"Warning: Could not parse relationship_gold for row {i}")
-        
-        # Get pre-extracted disorders and dates
-        extracted_disorders = row['extracted_disorders'] if 'extracted_disorders' in df.columns else []
-        formatted_dates = row['formatted_dates'] if 'formatted_dates' in df.columns else []
-        
-        dataset.append({
-            'clinical_note': row['note'],
-            'relationship_gold': relationship_gold,
-            'extracted_disorders': extracted_disorders,
-            'formatted_dates': formatted_dates
-        })
-        
-    print(f"Created dataset with {len(dataset)} entries")
-    
+    # Use the canonical data preparation pipeline
+    # This will directly load the CSV file and parse all entities and relationships
     print("Loading and preparing data...")
-    # Pass None as VocabClass to avoid building a new vocabulary
-    features, labels, _ = load_and_prepare_data(
-        dataset, training_config.MAX_DISTANCE, None
+    features, labels, _ = prepare_custom_training_data(
+        training_data_path, training_config.MAX_DISTANCE, None
     )
     print(f"Loaded {len(features)} examples")
     
@@ -117,8 +77,15 @@ def train():
         positive = sum(labels)
         negative = len(labels) - positive
         print(f"Class distribution: {positive} positive examples ({positive/len(labels)*100:.1f}%), {negative} negative examples ({negative/len(labels)*100:.1f}%)")
+        
+        # Check if we have any positive examples
+        if positive == 0:
+            print("ERROR: No positive examples found. The model will not learn anything useful.")
+            print("Please check your data format and ensure that relationship_gold contains valid relationships.")
+            sys.exit(1)
     else:
-        print("Warning: No examples found in the dataset!")
+        print("ERROR: No examples found in the dataset!")
+        print("Please check your data format and ensure that extracted_disorders and formatted_dates are correctly parsed.")
         sys.exit(1)
     
     # Step 3: Create train / val / test datasets 

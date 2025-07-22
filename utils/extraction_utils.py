@@ -15,8 +15,15 @@ import pandas as pd
 # Add dotenv for OpenAI API keys
 from dotenv import load_dotenv
 
-# Import from training_utils to avoid circular imports
-from utils.training_utils import preprocess_text
+# Clean and preprocess text for model input
+def preprocess_text(text):
+    # Convert to lowercase
+    text = text.lower()
+    # Replace special characters
+    text = re.sub(r'[^\w\s\.]', ' ', text)
+    # Replace multiple spaces with single space
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 # Get the appropriate data path based on the config
 def get_data_path(config):
@@ -52,20 +59,37 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     Supports real data from CSV files.
     
     Args:
-        dataset_path (str): Path to the dataset file (CSV) - this parameter is ignored if config is provided.
+        dataset_path (str): Path to the dataset file (CSV). If None, will use config.DATA_SOURCE to determine path.
         num_samples (int): Maximum number of samples to use (if provided).
         config: Configuration object containing paths and column names.
         
     Returns:
-        tuple: (prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold) or (None, None, None, None) if loading fails.
+        tuple: In multi_entity mode: (prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold) or (None, None, None, None) if loading fails.
+               In disorder_only mode: (prepared_test_data, relationship_gold) with entity_gold and pa_likelihood_gold set to None.
+               
                prepared_test_data is a list of dicts {'patient_id': ..., 'note_id': ..., 'note': ..., 'entities': ...}.
                entity_gold is a list of dicts {'note_id': ..., 'entity_label': ..., 'entity_category': ..., 'start': ..., 'end': ...}.
                relationship_gold is a list of dicts {'note_id': ..., 'patient_id': ..., 'entity_label': ..., 'entity_category': ..., 'date': ...}.
                pa_likelihood_gold is a dict mapping patient_id to likelihood value.
     """
-    # If config is provided, use it to get the correct dataset path (ignore the passed dataset_path)
-    if config:
-        dataset_path = get_data_path(config)
+    # Determine if we're in disorder_only mode
+    entity_mode = getattr(config, 'ENTITY_MODE', 'multi_entity')
+    disorder_only_mode = (entity_mode == 'disorder_only')
+    
+    # Print diagnostic information
+    print(f"\n===== LOAD_AND_PREPARE_DATA =====")
+    print(f"Entity mode: {entity_mode}")
+    
+        # If dataset_path is not provided and config is available, use config to determine path
+    if dataset_path is None and config:
+        if hasattr(config, 'DATA_SOURCE'):
+            dataset_path = get_data_path(config)
+        elif hasattr(config, 'DATA_PATH'):
+            dataset_path = config.DATA_PATH
+            
+    if not dataset_path:
+        print(f"Error: No dataset path provided and could not determine path from config")
+        return (None, None) if disorder_only_mode else (None, None, None, None)
     
     text_column = config.REAL_DATA_TEXT_COLUMN
     patient_id_column = getattr(config, 'REAL_DATA_PATIENT_ID_COLUMN', None)
@@ -76,25 +100,41 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     pa_likelihood_gold_col = getattr(config, 'PA_LIKELIHOOD_GOLD_COLUMN', None)
     legacy_gold_col = getattr(config, 'REAL_DATA_GOLD_COLUMN', None)
     
-    # Get column names for annotations if they exist in config
-    snomed_column = getattr(config, 'REAL_DATA_SNOMED_COLUMN', None)
-    umls_column = getattr(config, 'REAL_DATA_UMLS_COLUMN', None)
-    dates_column = getattr(config, 'REAL_DATA_DATES_COLUMN', None)
+    # Determine which columns to use for entity extraction based on mode
+    if disorder_only_mode:
+        # In disorder_only mode, we use diagnoses_column for disorders
+        diagnoses_column = getattr(config, 'REAL_DATA_DIAGNOSES_COLUMN', None)
+        dates_column = getattr(config, 'REAL_DATA_DATES_COLUMN', None)
+        print(f"Using disorder_only mode with columns: diagnoses={diagnoses_column}, dates={dates_column}")
+    else:
+        # In multi_entity mode, we use snomed_column and umls_column for entities
+        snomed_column = getattr(config, 'REAL_DATA_SNOMED_COLUMN', None)
+        umls_column = getattr(config, 'REAL_DATA_UMLS_COLUMN', None)
+        dates_column = getattr(config, 'REAL_DATA_DATES_COLUMN', None)
+        print(f"Using multi_entity mode with columns: snomed={snomed_column}, umls={umls_column}, dates={dates_column}")
+    
     timestamp_column = getattr(config, 'REAL_DATA_TIMESTAMP_COLUMN', None)
+    
+    # Print available columns for debugging
+    print(f"Dataset path: {dataset_path}")
+    print(f"Text column: {text_column}")
     
     if not os.path.exists(dataset_path):
         print(f"Error: Dataset not found at {dataset_path}")
-        return None, None, None, None
+        return (None, None) if disorder_only_mode else (None, None, None, None)
     
     print(f"Loading dataset from {dataset_path}...")
     try:
         # Read the CSV file
         df = pd.read_csv(dataset_path)
         
+        # Print available columns for debugging
+        print(f"Available columns in CSV: {list(df.columns)}")
+        
         # Check if the text column exists
         if text_column not in df.columns:
             print(f"Error: Text column '{text_column}' not found in CSV. Available columns: {list(df.columns)}")
-            return None, None, None, None
+            return (None, None) if disorder_only_mode else (None, None, None, None)
             
         print(f"Found {len(df)} records in CSV.")
         
@@ -117,15 +157,118 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
             
     except Exception as e:
         print(f"Error loading CSV: {e}")
-        return None, None, None, None
+        return (None, None) if disorder_only_mode else (None, None, None, None)
     
-    # Initialize gold standard lists and dict
+    # Initialize gold standard data structures
     entity_gold = []
     relationship_gold = []
     pa_likelihood_gold = {}
     
-    # --- 1. Process Entity Gold Standard ---
-    if entity_gold_col and entity_gold_col in df.columns:
+    # --- Process Relationship Gold Standard ---
+    # First check for the preferred column name
+    gold_column = relationship_gold_col if relationship_gold_col and relationship_gold_col in df.columns else legacy_gold_col
+    
+    if gold_column and gold_column in df.columns:
+        print(f"Found relationship gold standard column: {gold_column}. Processing gold standard data...")
+        
+        with tqdm(total=len(df), desc="Preparing relationship gold standard", unit="note") as pbar:
+            for i, row in df.iterrows():
+                # Check if the gold standard cell is not empty
+                gold_data = row.get(gold_column)
+                if pd.notna(gold_data) and gold_data:
+                    try:
+                        # Parse the JSON string in the gold standard column
+                        gold_json = json.loads(gold_data)
+                        
+                        # Check if this is the enhanced format (array of objects) or original format (object with 'relationships')
+                        if isinstance(gold_json, list):
+                            # Enhanced format - could have different structures
+                            for entry in gold_json:
+                                # Handle both formats: direct entity-date pairs or date-diagnoses structure
+                                if 'entity_label' in entry and 'date' in entry:
+                                    # Direct entity-date pair
+                                    relationship_gold.append({
+                                        'note_id': i,
+                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                                        'entity_label': str(entry['entity_label']).lower(),
+                                        'entity_category': str(entry.get('entity_category', 'disorder')).lower(),
+                                        'date': entry['date']
+                                    })
+                                elif 'diagnosis' in entry and 'date' in entry:
+                                    # Legacy direct diagnosis-date pair
+                                    relationship_gold.append({
+                                        'note_id': i,
+                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                                        'entity_label': str(entry['diagnosis']).lower(),
+                                        'entity_category': 'disorder',  # Default for legacy format
+                                        'date': entry['date']
+                                    })
+                                elif 'date' in entry and 'diagnoses' in entry:
+                                    # Date with multiple diagnoses
+                                    date_str = entry.get('date')
+                                    if not date_str:
+                                        continue
+                                    
+                                    try:
+                                        # Parse date string which might have non-padded month/day
+                                        date_parts = str(date_str).split('-')
+                                        if len(date_parts) == 3:
+                                            year, month, day = date_parts
+                                            normalized_date = f"{year}-{int(month):02d}-{int(day):02d}"
+                                        else:
+                                            normalized_date = date_str  # Keep original if not in expected format
+                                    except (ValueError, TypeError):
+                                        print(f"Warning: Could not normalize date '{date_str}' in gold standard for row {i}. Using as-is.")
+                                        normalized_date = date_str
+                                
+                                # Process each diagnosis associated with this date
+                                diagnoses = entry.get('diagnoses', [])
+                                for diag in diagnoses:
+                                    if 'diagnosis' in diag:
+                                        relationship_gold.append({
+                                            'note_id': i,
+                                            'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                                            'entity_label': str(diag['diagnosis']).lower(),
+                                                'entity_category': 'disorder',  # Default for legacy format
+                                                'date': normalized_date
+                                        })
+                        # Original format with 'relationships' key
+                        elif isinstance(gold_json, dict) and 'relationships' in gold_json and isinstance(gold_json['relationships'], list):
+                            for rel in gold_json['relationships']:
+                                if 'diagnosis' in rel and 'date' in rel:
+                                    # Normalize the date from the gold standard
+                                    date_str = rel.get('date')
+                                    try:
+                                        date_parts = str(date_str).split('-')
+                                        if len(date_parts) == 3:
+                                            year, month, day = date_parts
+                                            normalized_date = f"{year}-{int(month):02d}-{int(day):02d}"
+                                        else:
+                                            normalized_date = date_str  # Keep original if not in expected format
+                                    except (ValueError, TypeError):
+                                        print(f"Warning: Could not normalize date '{date_str}' in legacy gold standard for row {i}. Using as-is.")
+                                        normalized_date = date_str
+
+                                    relationship_gold.append({
+                                        'note_id': i,
+                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
+                                        'entity_label': str(rel['diagnosis']).lower(),
+                                        'entity_category': 'disorder',  # Default for legacy format
+                                        'date': normalized_date # Normalized YYYY-MM-DD format
+                                    })
+                        else:
+                            print(f"Warning: Unrecognized gold standard format for row {i}")
+                    except (json.JSONDecodeError, TypeError, KeyError) as e:
+                        print(f"Warning: Could not parse relationship gold standard for row {i}: {e}")
+                
+                pbar.update(1)
+        
+        print(f"Prepared relationship gold standard with {len(relationship_gold)} relationships.")
+    else:
+        print("No relationship gold standard column found or specified. Evaluation metrics will not be calculated.")
+    
+    # --- Process Entity Gold Standard (only in multi_entity mode) ---
+    if not disorder_only_mode and entity_gold_col and entity_gold_col in df.columns:
         print("Found entity gold standard column. Processing entity gold data...")
         
         with tqdm(total=len(df), desc="Preparing entity gold standard", unit="note") as pbar:
@@ -153,114 +296,11 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                 pbar.update(1)
         
         print(f"Prepared entity gold standard with {len(entity_gold)} entities.")
-    else:
+    elif not disorder_only_mode:
         print("No entity gold standard column found or specified.")
     
-    # --- 2. Process Relationship Gold Standard ---
-    if relationship_gold_col and relationship_gold_col in df.columns:
-        print("Found relationship gold standard column. Processing relationship gold data...")
-        
-        with tqdm(total=len(df), desc="Preparing relationship gold standard", unit="note") as pbar:
-            for i, row in df.iterrows():
-                # Check if the gold standard cell is not empty
-                gold_data = row.get(relationship_gold_col)
-                if pd.notna(gold_data) and gold_data:
-                    try:
-                        # Parse the JSON string in the gold standard column
-                        gold_json = json.loads(gold_data)
-                        
-                        # New format: expects a list of relationship objects
-                        for rel in gold_json:
-                            if 'entity_label' in rel and 'entity_category' in rel and 'date' in rel:
-                                relationship_gold.append({
-                                    'note_id': i,
-                                    'patient_id': row.get(patient_id_column) if patient_id_column else None,
-                                    'entity_label': str(rel['entity_label']).lower(),
-                                    'entity_category': str(rel['entity_category']).lower(),
-                                    'date': rel['date']
-                                })
-                    except (json.JSONDecodeError, TypeError, KeyError) as e:
-                        print(f"Warning: Could not parse relationship gold standard for row {i}: {e}")
-                
-                pbar.update(1)
-        
-        print(f"Prepared relationship gold standard with {len(relationship_gold)} relationships.")
-    # Legacy support for old gold_standard column
-    elif legacy_gold_col and legacy_gold_col in df.columns:
-        print("Found legacy gold standard column. Processing as relationship gold data...")
-        
-        with tqdm(total=len(df), desc="Preparing legacy gold standard", unit="note") as pbar:
-            for i, row in df.iterrows():
-                # Check if the gold standard cell is not empty
-                gold_data = row.get(legacy_gold_col)
-                if pd.notna(gold_data) and gold_data:
-                    try:
-                        # Parse the JSON string in the gold standard column
-                        gold_json = json.loads(gold_data)
-                        
-                        # New format: expects a list of relationship objects
-                        if isinstance(gold_json, list):
-                            for rel in gold_json:
-                                if 'entity_label' in rel and 'entity_category' in rel and 'date' in rel:
-                                    relationship_gold.append({
-                                        'note_id': i,
-                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
-                                        'entity_label': str(rel['entity_label']).lower(),
-                                        'entity_category': str(rel['entity_category']).lower(),
-                                        'date': rel['date']
-                                    })
-                                # Legacy format support
-                                elif 'diagnosis' in rel and 'date' in rel:
-                                    relationship_gold.append({
-                                        'note_id': i,
-                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
-                                        'entity_label': str(rel['diagnosis']).lower(),
-                                        'entity_category': 'disorder',  # Default category for legacy data
-                                        'date': rel['date']
-                                    })
-                        # Legacy format support for diagnoses
-                        elif isinstance(gold_json, list) and 'diagnoses' in gold_json[0]:
-                            for entry in gold_json:
-                                # Get the date information
-                                date = entry.get('date')
-                                if not date:
-                                    continue
-                                
-                                # Process each diagnosis associated with this date
-                                diagnoses = entry.get('diagnoses', [])
-                                for diag in diagnoses:
-                                    if 'diagnosis' in diag:
-                                        relationship_gold.append({
-                                            'note_id': i,
-                                            'patient_id': row.get(patient_id_column) if patient_id_column else None,
-                                            'entity_label': str(diag['diagnosis']).lower(),
-                                            'entity_category': 'disorder',  # Default category for legacy data
-                                            'date': date  # Already in YYYY-MM-DD format
-                                        })
-                        # Original format with 'relationships' key
-                        elif 'relationships' in gold_json and isinstance(gold_json['relationships'], list):
-                            for rel in gold_json['relationships']:
-                                if 'diagnosis' in rel and 'date' in rel:
-                                    relationship_gold.append({
-                                        'note_id': i,
-                                        'patient_id': row.get(patient_id_column) if patient_id_column else None,
-                                        'entity_label': str(rel['diagnosis']).lower(),
-                                        'entity_category': 'disorder',  # Default category for legacy data
-                                        'date': rel['date'] # Assume date is already YYYY-MM-DD
-                                    })
-                        else:
-                            print(f"Warning: Unrecognized gold standard format for row {i}")
-                    except (json.JSONDecodeError, TypeError, KeyError) as e:
-                        print(f"Warning: Could not parse gold standard for row {i}: {e}")
-                
-                pbar.update(1)
-        
-        print(f"Prepared relationship gold standard with {len(relationship_gold)} relationships.")
-    else:
-        print("No relationship gold standard column found or specified.")
-    
-    # --- 3. Process PA Likelihood Gold Standard ---
-    if pa_likelihood_gold_col and pa_likelihood_gold_col in df.columns:
+    # --- Process PA Likelihood Gold Standard (only in multi_entity mode) ---
+    if not disorder_only_mode and pa_likelihood_gold_col and pa_likelihood_gold_col in df.columns:
         print("Found PA likelihood gold standard column. Processing likelihood data...")
         
         for i, row in df.iterrows():
@@ -274,85 +314,154 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                     print(f"Warning: Could not convert PA likelihood value '{likelihood}' to float for patient {patient_id}: {e}")
         
         print(f"Prepared PA likelihood gold standard for {len(pa_likelihood_gold)} patients.")
-    else:
+    elif not disorder_only_mode:
         print("No PA likelihood gold standard column found or specified.")
     
     # Pre-extract entities from the text column
     print("Pre-extracting entities...")
     prepared_test_data = []
     
+    # Diagnostic counters
+    notes_with_entities = 0
+    total_entities = 0
+    total_dates = 0
+    
     with tqdm(total=len(df), desc="Processing annotations", unit="note") as pbar:
         for i, row in df.iterrows():
             # Get the text from the specified column
             text = str(row.get(text_column, ''))
             
-            # This will become a unified list of all entities from all sources
-            all_entities_list = []
+            # Initialize entities as empty lists in case we can't get valid annotations
+            entities = ([], [])
             
-            # Helper function to parse entity data
-            def parse_entities(entity_data, source_name):
-                parsed_list = []
-                if pd.notna(entity_data) and entity_data:
-                    try:
-                        valid_json = transform_python_to_json(entity_data)
-                        entities = json.loads(valid_json)
-                        for entity in entities:
-                            # The new format includes 'categories'
-                            categories = entity.get('categories', ['unknown'])
-                            category = categories[0] if categories else 'unknown'
+            # Determine which entity extraction approach to use based on mode
+            if disorder_only_mode:
+                # --- DISORDER ONLY MODE ENTITY EXTRACTION ---
+                # Check if we have pre-annotated entities in the CSV
+                use_annotations = diagnoses_column and dates_column and diagnoses_column in df.columns and dates_column in df.columns
+                
+                if i < 3:  # Just for the first few rows
+                    print(f"\nRow {i} - Using disorder_only annotations: {use_annotations}")
+                    if use_annotations:
+                        print(f"  Diagnoses column: {diagnoses_column}")
+                        print(f"  Dates column: {dates_column}")
+                
+                if use_annotations:
+                    # Get the annotations from the CSV
+                    diagnoses_data = row.get(diagnoses_column)
+                    dates_data = row.get(dates_column)
+                    
+                    # Print raw data for first few rows
+                    if i < 3:
+                        print(f"Row {i} - Raw diagnoses data: {str(diagnoses_data)[:100]}...")
+                        print(f"Row {i} - Raw dates data: {str(dates_data)[:100]}...")
+                    
+                    if pd.notna(diagnoses_data) and pd.notna(dates_data):
+                        try:
+                            # Parse diagnoses annotations from JSON format
+                            diagnoses_list = []
+                            # Transform Python-style string to valid JSON before parsing
+                            valid_diagnoses_json = transform_python_to_json(diagnoses_data)
+                            disorders = json.loads(valid_diagnoses_json)
+                            for disorder in disorders:
+                                label = disorder.get('label', '')
+                                start_pos = disorder.get('start', 0)
+                                diagnoses_list.append((label.lower(), start_pos))
                             
-                            parsed_list.append({
-                                'label': entity.get('label', '').lower(),
-                                'start': entity.get('start', 0),
-                                'end': entity.get('end', 0),
-                                'category': category,
-                                'source': source_name
-                            })
-                    except (json.JSONDecodeError, TypeError) as e:
-                        print(f"Warning: Could not parse {source_name} entities for row {i}: {e}")
-                return parsed_list
+                            # Parse dates annotations from JSON format
+                            dates_list = []
+                            # Transform Python-style string to valid JSON before parsing
+                            valid_dates_json = transform_python_to_json(dates_data)
+                            formatted_dates = json.loads(valid_dates_json)
+                            for date_obj in formatted_dates:
+                                parsed_date = date_obj.get('parsed', '')
+                                original_date = date_obj.get('original', '')
+                                start_pos = date_obj.get('start', 0)
+                                dates_list.append((parsed_date, original_date, start_pos))
+                            
+                            # If we found entities, use them
+                            if diagnoses_list or dates_list:
+                                entities = (diagnoses_list, dates_list)
+                                
+                                # Update counters
+                                if diagnoses_list and dates_list:
+                                    notes_with_entities += 1
+                                total_entities += len(diagnoses_list)
+                                total_dates += len(dates_list)
+                                
+                                if i < 3:  # Just for debugging, show first few entities
+                                    print(f"Row {i} diagnoses: {diagnoses_list[:2]}...")
+                                    print(f"Row {i} dates: {dates_list[:2]}...")
+                        except Exception as e:
+                            # Print detailed error
+                            if i < 10:
+                                print(f"ERROR parsing entities for row {i}: {str(e)}")
+                                print(f"  diagnoses_data type: {type(diagnoses_data)}")
+                                print(f"  dates_data type: {type(dates_data)}")
+                                
+                                # Try to show the problematic part of the data
+                                if isinstance(diagnoses_data, str):
+                                    print(f"  diagnoses_data sample: {diagnoses_data[:100]}...")
+                                if isinstance(dates_data, str):
+                                    print(f"  dates_data sample: {dates_data[:100]}...")
+            else:
+                # --- MULTI ENTITY MODE ENTITY EXTRACTION ---
+                # In multi_entity mode, we use parse_entities helper function
+                entities_list = []
+                dates_list = []
+                
+                # Initialize column variables
+                snomed_column = config.REAL_DATA_SNOMED_COLUMN if hasattr(config, 'REAL_DATA_SNOMED_COLUMN') else None
+                umls_column = config.REAL_DATA_UMLS_COLUMN if hasattr(config, 'REAL_DATA_UMLS_COLUMN') else None
+                
+                # Process SNOMED entities if available
+                if snomed_column and snomed_column in df.columns:
+                    snomed_data = row.get(snomed_column)
+                    if pd.notna(snomed_data) and snomed_data:
+                        try:
+                            # Use the parse_entities helper function
+                            snomed_entities = parse_entities(snomed_data, "SNOMED")
+                            entities_list.extend(snomed_entities)
+                        except Exception as e:
+                            print(f"Error parsing SNOMED entities for row {i}: {e}")
+                
+                # Process UMLS entities if available
+                if umls_column and umls_column in df.columns:
+                    umls_data = row.get(umls_column)
+                    if pd.notna(umls_data) and umls_data:
+                        try:
+                            # Use the parse_entities helper function
+                            umls_entities = parse_entities(umls_data, "UMLS")
+                            entities_list.extend(umls_entities)
+                        except Exception as e:
+                            print(f"Error parsing UMLS entities for row {i}: {e}")
+                
+                # Process dates
+                if dates_column and dates_column in df.columns:
+                    dates_data = row.get(dates_column)
+                    if pd.notna(dates_data) and dates_data:
+                        try:
+                            # Transform Python-style string to valid JSON before parsing
+                            valid_dates_json = transform_python_to_json(dates_data)
+                            formatted_dates = json.loads(valid_dates_json)
+                            for date_obj in formatted_dates:
+                                parsed_date = date_obj.get('parsed', '')
+                                original_date = date_obj.get('original', '')
+                                start_pos = date_obj.get('start', 0)
+                                dates_list.append((parsed_date, original_date, start_pos))
+                        except Exception as e:
+                            print(f"Error parsing dates for row {i}: {e}")
+                
+                # Update entities tuple with the combined data
+                entities = (entities_list, dates_list)
+                
+                # Update counters
+                if entities_list and dates_list:
+                    notes_with_entities += 1
+                total_entities += len(entities_list)
+                total_dates += len(dates_list)
             
-            # Initialize dates list
-            dates_list = []
-            
-            # Parse SNOMED entities if column exists
-            if snomed_column and snomed_column in df.columns:
-                snomed_entities = parse_entities(row.get(snomed_column), 'snomed')
-                all_entities_list.extend(snomed_entities)
-                if i < 3 and snomed_entities:  # Debug output
-                    print(f"Row {i} SNOMED entities: {snomed_entities[:2]}...")
-
-            # Parse UMLS entities if column exists
-            if umls_column and umls_column in df.columns:
-                umls_entities = parse_entities(row.get(umls_column), 'umls')
-                all_entities_list.extend(umls_entities)
-                if i < 3 and umls_entities:  # Debug output
-                    print(f"Row {i} UMLS entities: {umls_entities[:2]}...")
-            
-            # Parse dates annotations from JSON format
-            if dates_column and dates_column in df.columns:
-                dates_data = row.get(dates_column)
-                if pd.notna(dates_data) and dates_data:
-                    try:
-                        # Transform Python-style string to valid JSON before parsing
-                        valid_dates_json = transform_python_to_json(dates_data)
-                        formatted_dates = json.loads(valid_dates_json)
-                        for date_obj in formatted_dates:
-                            parsed_date = date_obj.get('parsed', '')
-                            original_date = date_obj.get('original', '')
-                            start_pos = date_obj.get('start', 0)
-                            dates_list.append((parsed_date, original_date, start_pos))
-                        
-                        if i < 3 and dates_list:  # Debug output
-                            print(f"Row {i} dates: {dates_list[:2]}...")
-                    except (json.JSONDecodeError, TypeError) as e:
-                        print(f"Warning: Could not parse dates for row {i}: {e}")
-            
-            # The 'entities' object passed to the extractor is now a tuple
-            # containing the unified list of entity dicts and the list of date tuples
-            entities = (all_entities_list, dates_list)
-            
-            # Try to extract relative dates using LLM if enabled and we have a timestamp
+            # Process relative dates if enabled (same for both modes)
             if relative_date_extraction_enabled:
                 # Get the document timestamp
                 timestamp_str = row.get(timestamp_column)
@@ -389,10 +498,11 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                             
                             if relative_dates:
                                 # Append relative dates to existing dates list
+                                entities_list, dates_list = entities
                                 combined_dates_list = dates_list + relative_dates
                                 
                                 # Update entities with combined dates
-                                entities = (all_entities_list, combined_dates_list)
+                                entities = (entities_list, combined_dates_list)
                                 
                                 # Convert relative dates to JSON for storage in CSV
                                 relative_dates_json = []
@@ -409,29 +519,49 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                                 
                                 if i % 20 == 0 or i < 3:  # Reduce output, just show some samples
                                     print(f"Row {i} extracted {len(relative_dates)} relative dates")
-                        else:
-                            print(f"Warning: Could not parse timestamp '{timestamp_str}' for row {i}")
-                    
                     except Exception as e:
                         print(f"Error extracting relative dates for row {i}: {e}")
             
-            # Add to prepared data
+            # Add the prepared data entry - MOVED OUTSIDE THE IF/ELSE BLOCK
             prepared_test_data.append({
-                'patient_id': row.get(patient_id_column) if patient_id_column else None,
                 'note_id': i,
+                'patient_id': row.get(patient_id_column) if patient_id_column else None,
                 'note': text,
-                'entities': entities,  # Pass the new unified entity structure
-                'extracted_entities': all_entities_list  # Keep the extracted entities for NER evaluation
+                'entities': entities
             })
             
             pbar.update(1)
     
-    # Save the updated dataframe with the new column back to CSV
-    if relative_date_extraction_enabled:
-        print(f"Saving CSV with LLM extracted dates to {dataset_path}")
-        df.to_csv(dataset_path, index=False)
+    # Print summary of entity extraction
+    print("\n===== ENTITY EXTRACTION SUMMARY =====")
+    print(f"Total notes processed: {len(prepared_test_data)}")
+    print(f"Notes with entities: {notes_with_entities}/{len(prepared_test_data)} ({notes_with_entities/len(prepared_test_data)*100:.1f}%)")
+    print(f"Total entities extracted: {total_entities}")
+    print(f"Total dates extracted: {total_dates}")
+    print(f"Average entities per note: {total_entities/max(1, len(prepared_test_data)):.2f}")
+    print(f"Average dates per note: {total_dates/max(1, len(prepared_test_data)):.2f}")
+    print("===== END ENTITY EXTRACTION SUMMARY =====\n")
     
-    return prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold
+    # Save the updated dataframe back to CSV if we extracted relative dates
+    if relative_date_extraction_enabled and 'llm_extracted_dates' in df.columns:
+        try:
+            # Create a backup of the original CSV
+            backup_path = dataset_path + '.backup'
+            if not os.path.exists(backup_path):
+                df.to_csv(backup_path, index=False)
+                print(f"Created backup of original CSV at {backup_path}")
+            
+            # Save the updated dataframe with LLM-extracted dates
+            df.to_csv(dataset_path, index=False)
+            print(f"Saved updated CSV with LLM-extracted dates to {dataset_path}")
+        except Exception as e:
+            print(f"Error saving updated CSV: {e}")
+    
+    # Return appropriate values based on mode
+    if disorder_only_mode:
+        return prepared_test_data, relationship_gold
+    else:
+        return prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold
 
 # Inference-related functions moved from training_utils.py
 def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
@@ -683,72 +813,89 @@ def run_extraction(extractor, prepared_test_data):
         prepared_test_data (list): List of dicts {'patient_id': ..., 'note_id': ..., 'note': ..., 'entities': ...}.
 
     Returns:
-        list: List of predicted relationships [{'note_id': ..., 'patient_id': ..., 'entity_label': ..., 'entity_category': ..., 'date': ..., 'confidence': ...}].
+        list: List of predicted relationships [{'note_id': ..., 'patient_id': ..., 'entity_label': ..., 'entity_category': ..., 'date': ..., 'confidence': ...}]
+             or [{'note_id': ..., 'patient_id': ..., 'diagnosis': ..., 'date': ..., 'confidence': ...}] in disorder_only mode.
     """
     print(f"Generating predictions using {extractor.name}...")
     all_predictions = []
     skipped_rels = 0
+    
+    # Determine if we're in disorder_only mode based on the extractor name
+    # This is a heuristic - we assume extractors with 'naive', 'custom', or 'relcat' in their name
+    # are older extractors that use the 'diagnosis' field instead of 'entity_label'
+    disorder_only_extractors = ['naive', 'custom', 'relcat']
+    disorder_only_mode = any(name.lower() in extractor.name.lower() for name in disorder_only_extractors)
+    
     for note_entry in tqdm(prepared_test_data, desc=f"Processing with {extractor.name}", unit="note"):
         note_id = note_entry['note_id']
         patient_id = note_entry['patient_id']
         try:
             # Extract relationships using the provided extractor
-            relationships = extractor.extract(note_entry['note'], entities=note_entry['entities'])
+            relationships = extractor.extract(note_entry['note'], entities=note_entry['entities'], 
+                                            note_id=note_id, patient_id=patient_id)
+            
             for rel in relationships:
-                # Ensure required keys exist and handle potential missing fields
-                raw_date = rel.get('date')
-                entity_label = rel.get('entity_label')  # Changed from 'diagnosis'
-                entity_category = rel.get('entity_category', 'unknown')  # New field with default
-
-                if raw_date is None or entity_label is None:
-                    print(f"Warning: Skipping relationship in note {note_id} due to missing 'date' or 'entity_label'. Rel: {rel}")
+                # Check if we have a disorder_only mode extractor (using 'diagnosis')
+                # or a multi_entity mode extractor (using 'entity_label')
+                if 'diagnosis' in rel:
+                    # disorder_only mode
+                    entity_label = rel.get('diagnosis')
+                    entity_category = 'disorder'  # Default for disorder_only mode
+                elif 'entity_label' in rel:
+                    # multi_entity mode
+                    entity_label = rel.get('entity_label')
+                    entity_category = rel.get('entity_category', 'unknown')
+                else:
+                    # Missing both required fields
+                    print(f"Warning: Relationship missing both 'diagnosis' and 'entity_label' fields: {rel}")
+                    skipped_rels += 1
+                    continue
+                
+                # Get the date
+                date_str = rel.get('date')
+                
+                if date_str is None or entity_label is None:
+                    missing_fields = []
+                    if date_str is None:
+                        missing_fields.append("'date'")
+                    if entity_label is None:
+                        missing_fields.append("'diagnosis'/'entity_label'")
+                    
+                    print(f"Warning: Skipping relationship in note {note_id} due to missing {' and '.join(missing_fields)}. Rel: {rel}")
                     skipped_rels += 1
                     continue
 
-                # Normalize entity and date
-                normalized_label = str(entity_label).strip().lower()
-                normalized_category = str(entity_category).strip().lower()
-                date_str = str(raw_date).strip()
+                # Normalize entity label and date
+                normalized_entity = str(entity_label).strip().lower() # Ensure string, strip, lower
+                date_str = str(date_str).strip() # Ensure string and strip whitespace
 
-                if date_str and normalized_label:
-                    all_predictions.append({
-                        'note_id': note_id,
-                        'patient_id': patient_id,
-                        'entity_label': normalized_label,
-                        'entity_category': normalized_category,
-                        'date': date_str,
-                        'confidence': rel.get('confidence', 1.0)  # Default confidence to 1.0 if missing
-                    })
-                else:
-                    # Log if validation failed
-                    skipped_rels += 1
-                    
-            # Handle legacy extractor output format (with 'diagnosis' instead of 'entity_label')
-            for rel in relationships:
-                if 'diagnosis' in rel and 'entity_label' not in rel:
-                    raw_date = rel.get('date')
-                    raw_diagnosis = rel.get('diagnosis')
-                    
-                    if raw_date is None or raw_diagnosis is None:
-                        continue  # Skip if missing required fields
-                        
-                    # Normalize diagnosis and date
-                    normalized_diagnosis = str(raw_diagnosis).strip().lower()
-                    date_str = str(raw_date).strip()
-                    
-                    if date_str and normalized_diagnosis:
+                if date_str and normalized_entity:
+                    # Create prediction in the appropriate format based on the mode
+                    if disorder_only_mode:
                         all_predictions.append({
                             'note_id': note_id,
                             'patient_id': patient_id,
-                            'entity_label': normalized_diagnosis,
-                            'entity_category': 'disorder',  # Default category for legacy format
+                            'diagnosis': normalized_entity,
                             'date': date_str,
-                            'confidence': rel.get('confidence', 1.0)
+                            'confidence': rel.get('confidence', 1.0) # Default confidence to 1.0 if missing
                         })
+                    else:
+                        all_predictions.append({
+                            'note_id': note_id,
+                            'patient_id': patient_id,
+                            'entity_label': normalized_entity,
+                            'entity_category': entity_category,
+                            'date': date_str,
+                            'confidence': rel.get('confidence', 1.0) # Default confidence to 1.0 if missing
+                        })
+                else:
+                    # Log if validation failed
+                    skipped_rels += 1
         except Exception as e:
             # Log errors during extraction for a specific note
             print(f"Extraction error on note {note_id} for {extractor.name}: {e}")
-            continue  # Continue with the next note
+            # Optionally, re-raise if you want errors to halt execution: raise e
+            continue # Continue with the next note
 
     print(f"Generated {len(all_predictions)} predictions. Skipped {skipped_rels} potentially invalid relationships.")
     return all_predictions
@@ -760,9 +907,9 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
 
     Args:
         all_predictions (list): List of predicted relationships (normalized by the caller).
-                                Each dict must contain 'note_id', 'entity_label', 'entity_category', 'date' (YYYY-MM-DD).
+                                Each dict must contain 'note_id', 'diagnosis'/'entity_label', 'date' (YYYY-MM-DD).
         gold_standard (list): List of gold standard relationships (normalized).
-                              Each dict must contain 'note_id', 'entity_label', 'entity_category', 'date' (YYYY-MM-DD).
+                              Each dict must contain 'note_id', 'diagnosis'/'entity_label', 'date' (YYYY-MM-DD).
         extractor_name (str): Name of the extractor being evaluated.
         output_dir (str): Directory to save evaluation outputs.
         total_notes_processed (int): The total number of notes processed by the extractor.
@@ -771,6 +918,24 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
     Returns:
         dict: A dictionary containing calculated metrics.
     """
+    # Determine if we're in disorder_only mode by checking the keys in gold_standard
+    # If any item has 'diagnosis' key, we're in disorder_only mode
+    disorder_only_mode = False
+    entity_key = 'entity_label'  # Default to multi_entity mode
+    
+    if gold_standard and len(gold_standard) > 0:
+        if 'diagnosis' in gold_standard[0]:
+            disorder_only_mode = True
+            entity_key = 'diagnosis'
+    
+    # Also check the predictions to determine mode
+    if all_predictions and len(all_predictions) > 0:
+        if 'diagnosis' in all_predictions[0]:
+            disorder_only_mode = True
+            entity_key = 'diagnosis'
+    
+    print(f"Using {'disorder_only' if disorder_only_mode else 'multi_entity'} mode with entity key: {entity_key}")
+    
     if not gold_standard:
         print(f"  No gold standard data provided for {extractor_name} (processed {total_notes_processed} notes). Skipping metric calculation.")
         # Return zeroed metrics if no gold standard
@@ -795,11 +960,27 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
     # Filter predictions to include only those from labeled notes
     filtered_predictions = [p for p in all_predictions if p['note_id'] in gold_note_ids]
     
-    # Handle legacy format predictions (with 'diagnosis' instead of 'entity_label')
-    for pred in filtered_predictions:
-        if 'diagnosis' in pred and 'entity_label' not in pred:
-            pred['entity_label'] = pred['diagnosis']
-            pred['entity_category'] = 'disorder'  # Default category for legacy format
+    # --- DEBUG: Print predictions and gold standards for comparison ---
+    print("\n--- Comparing Predictions to Gold Standard ---")
+    for note_id in sorted(gold_note_ids)[:3]:  # Limit to first 3 notes to avoid overwhelming output
+        # Using a simple list comprehension for clarity
+        note_preds = [p for p in filtered_predictions if p.get('note_id') == note_id]
+        note_golds = [g for g in gold_standard if g.get('note_id') == note_id]
+        
+        print(f"\n[Note ID: {note_id}]")
+        # To make it easier to read, convert dicts to strings and join them
+        # Always use entity_label since our refactoring standardized on that field
+        gold_str = '\n    - '.join([f"{g.get('entity_label', 'unknown')} @ {g.get('date', 'unknown')}" for g in note_golds])
+        
+        # For predictions, still respect the mode since extractors might return different fields
+        if disorder_only_mode:
+            pred_str = '\n    - '.join([f"{p.get('diagnosis', p.get('entity_label', 'unknown'))} @ {p.get('date', 'unknown')}" for p in note_preds])
+        else:
+            pred_str = '\n    - '.join([f"{p.get('entity_label', p.get('diagnosis', 'unknown'))} @ {p.get('date', 'unknown')}" for p in note_preds])
+        
+        print(f"  Gold Standard : \n    - {gold_str if gold_str else '[]'}")
+        print(f"  Predictions   : \n    - {pred_str if pred_str else '[]'}")
+    print("--------------------------------------------\n")
     
     if not filtered_predictions:
         print(f"  No predictions found for the {num_labeled_notes} labeled notes by {extractor_name}.")
@@ -808,11 +989,59 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
         false_positives = 0
         false_negatives = len(gold_standard) # All gold items were missed
         pred_set = set()  # Empty set for reporting
-        gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in gold_standard)
+        
+        # Create gold_set based on the mode
+        gold_set = set()
+        for g in gold_standard:
+            # Always use entity_label for gold standard since our refactoring standardized on that field
+            gold_set.add((g['note_id'], g.get('entity_label', ''), g.get('date', '')))
     else:
         # Convert filtered predictions and gold standard to sets for comparison
-        pred_set = set((p['note_id'], p['entity_label'], p['entity_category'], p['date']) for p in filtered_predictions)
-        gold_set = set((g['note_id'], g['entity_label'], g['entity_category'], g['date']) for g in gold_standard)
+        # Handle both disorder_only and multi_entity modes
+        pred_set = set()
+        for p in filtered_predictions:
+            if disorder_only_mode:
+                # In disorder_only mode, use 'diagnosis' field
+                if 'diagnosis' in p:
+                    pred_set.add((p['note_id'], p['diagnosis'], p['date']))
+                else:
+                    # If 'diagnosis' is missing but 'entity_label' exists, use that instead
+                    if 'entity_label' in p:
+                        pred_set.add((p['note_id'], p['entity_label'], p['date']))
+                    else:
+                        print(f"Warning: Prediction missing both 'diagnosis' and 'entity_label' fields: {p}")
+            else:
+                # In multi_entity mode, use 'entity_label' field
+                if 'entity_label' in p:
+                    if 'entity_category' in p:
+                        pred_set.add((p['note_id'], p['entity_label'], p['entity_category'], p['date']))
+                    else:
+                        pred_set.add((p['note_id'], p['entity_label'], p['date']))
+                else:
+                    # If 'entity_label' is missing but 'diagnosis' exists, use that instead
+                    if 'diagnosis' in p:
+                        pred_set.add((p['note_id'], p['diagnosis'], 'disorder', p['date']))
+                    else:
+                        print(f"Warning: Prediction missing both 'entity_label' and 'diagnosis' fields: {p}")
+        
+        # Similarly for gold standard
+        gold_set = set()
+        for g in gold_standard:
+            # Always use entity_label for gold standard since our refactoring standardized on that field
+            if 'entity_label' in g:
+                if 'entity_category' in g and not disorder_only_mode:
+                    gold_set.add((g['note_id'], g['entity_label'], g['entity_category'], g['date']))
+                else:
+                    gold_set.add((g['note_id'], g['entity_label'], g['date']))
+            else:
+                # Fall back to diagnosis if entity_label is not available (should not happen after refactoring)
+                if 'diagnosis' in g:
+                    if not disorder_only_mode:
+                        gold_set.add((g['note_id'], g['diagnosis'], 'disorder', g['date']))
+                    else:
+                        gold_set.add((g['note_id'], g['diagnosis'], g['date']))
+                else:
+                    print(f"Warning: Gold standard missing both 'entity_label' and 'diagnosis' fields: {g}")
 
         # Calculate TP, FP, FN based on filtered predictions
         true_positives = len(pred_set & gold_set)
