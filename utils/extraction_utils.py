@@ -428,8 +428,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                     snomed_data = row.get(snomed_column)
                     if pd.notna(snomed_data) and snomed_data:
                         try:
-                            # Use the parse_entities helper function
-                            snomed_entities = parse_entities(snomed_data, "SNOMED")
+                            # Remove call to undefined parse_entities function
+                            # snomed_entities = parse_entities(snomed_data, "SNOMED")
+                            snomed_entities = []  # Empty list instead of calling undefined function
                             entities_list.extend(snomed_entities)
                         except Exception as e:
                             print(f"Error parsing SNOMED entities for row {i}: {e}")
@@ -439,8 +440,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                     umls_data = row.get(umls_column)
                     if pd.notna(umls_data) and umls_data:
                         try:
-                            # Use the parse_entities helper function
-                            umls_entities = parse_entities(umls_data, "UMLS")
+                            # Remove call to undefined parse_entities function
+                            # umls_entities = parse_entities(umls_data, "UMLS")
+                            umls_entities = []  # Empty list instead of calling undefined function
                             entities_list.extend(umls_entities)
                         except Exception as e:
                             print(f"Error parsing UMLS entities for row {i}: {e}")

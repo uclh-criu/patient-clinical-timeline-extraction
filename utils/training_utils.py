@@ -139,11 +139,10 @@ def plot_training_curves(train_losses, val_losses, val_accs, save_path, show_plo
         save_path: Path to save the plot
         show_plot: Whether to display the plot (default: False)
     """
-        # Check if save_path needs to be modified to include _training_curves.png
+    # Make sure the save path has a proper extension
     if not save_path.endswith('.png'):
-        dir_path = os.path.dirname(save_path)
-        base_name = os.path.splitext(os.path.basename(save_path))[0]
-        save_path = os.path.join(dir_path, f"{base_name}_training_curves.png")
+        # If no .png extension, add it
+        save_path = save_path + '.png'
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
     
