@@ -26,7 +26,7 @@ RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'custom'
+EXTRACTION_METHOD = 'bert'
 
 # Methods to include when running in 'compare' mode
 COMPARISON_METHODS = ['naive', 'custom', 'bert']

@@ -103,6 +103,7 @@ def main():
     print(f"Starting training for {training_config.BERT_NUM_TRAIN_EPOCHS} epochs...")
     train_losses, val_losses, val_accuracies = train_bert_model(
         model,
+        tokenizer,
         train_loader,
         val_loader,
         optimizer,

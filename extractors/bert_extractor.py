@@ -19,18 +19,19 @@ class BertExtractor(BaseRelationExtractor):
         self.model_path = config.BERT_MODEL_PATH
         self.name = "BERT"
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.debug = getattr(config, 'MODEL_DEBUG_MODE', False)
         
         # Get BERT parameters from training config
         try:
             from model_training import training_config
             self.pretrained_model_name = training_config.BERT_PRETRAINED_MODEL
             self.max_seq_length = training_config.BERT_MAX_SEQ_LENGTH
-            self.confidence_threshold = getattr(training_config, 'BERT_CONFIDENCE_THRESHOLD', 0.5)
+            self.confidence_threshold = getattr(training_config, 'BERT_CONFIDENCE_THRESHOLD', 0.2)  # Lower default threshold
         except (ImportError, AttributeError) as e:
             print(f"Warning: Could not load training_config. Using default values. Error: {e}")
             self.pretrained_model_name = 'dmis-lab/biobert-base-cased-v1.1'
             self.max_seq_length = 512
-            self.confidence_threshold = 0.5
+            self.confidence_threshold = 0.2  # Lower threshold
         
         # Initialize model and tokenizer as None (will be loaded in load())
         self.model = None
@@ -190,6 +191,10 @@ class BertExtractor(BaseRelationExtractor):
                     probabilities = torch.sigmoid(logits)
                     confidence = probabilities.item()
                 
+                # DIAGNOSTIC PRINT: Show confidence for each pair
+                if self.debug:
+                    print(f"  - BERT Pair: ('{entity_label}', '{parsed_date}') -> Confidence: {confidence:.4f}")
+                
                 # Only include relationships above the confidence threshold
                 if confidence >= self.confidence_threshold:
                     relationships.append({
@@ -198,5 +203,15 @@ class BertExtractor(BaseRelationExtractor):
                         'date': parsed_date,
                         'confidence': confidence
                     })
+        
+        # DIAGNOSTIC SUMMARY
+        if self.debug and len(entities_list) > 0 and len(dates) > 0:
+            print(f"\n===== BERT PREDICTION SUMMARY =====")
+            print(f"Total entity-date pairs considered: {len(entities_list) * len(dates)}")
+            print(f"Pairs above confidence threshold ({self.confidence_threshold}): {len(relationships)}")
+            print(f"Current confidence threshold: {self.confidence_threshold}")
+            if len(relationships) == 0:
+                print(f"WARNING: No predictions above threshold. Consider lowering the confidence threshold.")
+            print(f"==============================\n")
         
         return relationships

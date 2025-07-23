@@ -125,6 +125,8 @@ class CustomExtractor(BaseRelationExtractor):
         diagnoses_for_model = [(d[0], d[1]) for d in diagnoses]
         
         # DIAGNOSTIC: Print the extracted entities and dates
+        # Comment out the extracted entities and dates section
+        """
         if self.debug:
             print("\n===== DIAGNOSTIC: EXTRACTED ENTITIES AND DATES =====")
             print(f"Number of diagnoses: {len(diagnoses_for_model)}")
@@ -144,10 +146,13 @@ class CustomExtractor(BaseRelationExtractor):
                 end = min(len(text), pos + 20)
                 snippet = text[start:end].replace('\n', ' ')
                 print(f"     Context: '...{snippet}...'")
+        """
         
         features = preprocess_note_for_prediction(text, diagnoses_for_model, dates, self.pred_max_distance)
         
         # DIAGNOSTIC: Print the generated features (candidate pairs)
+        # Comment out the redundant candidate pairs section
+        """
         if self.debug:
             print("\n===== DIAGNOSTIC: GENERATED CANDIDATE PAIRS =====")
             print(f"Number of candidate pairs: {len(features)}")
@@ -160,6 +165,7 @@ class CustomExtractor(BaseRelationExtractor):
                 print(f"  Context snippet (truncated): '{feature['context'][:100]}...'")
             if len(features) > 3:
                 print(f"  ... and {len(features) - 3} more candidate pairs")
+        """
         
         # Pass the confirmed lists to the next function
         test_data = create_prediction_dataset(features, self.vocab, self.device, 
@@ -169,19 +175,22 @@ class CustomExtractor(BaseRelationExtractor):
         entity_predictions = {}
         self.model.eval()
         
+        # Comment out the MODEL PREDICTIONS section
+        """
         if self.debug:
             print("\n===== DIAGNOSTIC: MODEL PREDICTIONS =====")
+        """
         
         prediction_count = 0
         
         with torch.no_grad():
             for data in test_data:
                 # DIAGNOSTIC: Print the input tensors (shapes and values)
-                if self.debug and prediction_count < 3:  # Only print first 3 for brevity
-                    print(f"\nPrediction {prediction_count + 1}:")
-                    print(f"  Context tensor shape: {data['context'].shape}")
-                    print(f"  Distance value: {data['distance'].item()}")
-                    print(f"  Diag_before value: {data['diag_before'].item()}")
+                #if self.debug and prediction_count < 3:  # Only print first 3 for brevity
+                    #print(f"\nPrediction {prediction_count + 1}:")
+                    #print(f"  Context tensor shape: {data['context'].shape}")
+                    #print(f"  Distance value: {data['distance'].item()}")
+                    #print(f"  Diag_before value: {data['diag_before'].item()}")
                 
                 output = self.model(data['context'], data['distance'], data['diag_before'])
                 prob = output.item()
@@ -190,9 +199,12 @@ class CustomExtractor(BaseRelationExtractor):
                 diagnosis = feature['diagnosis']
                 date = feature['date']
                 
-                # DIAGNOSTIC: Print the model's prediction
-                if self.debug and prediction_count < 3:  # Only print first 3 for brevity
+                # Comment out the model's prediction prints
+                """
+                # DIAGNOSTIC: Print the model's prediction for ALL pairs, not just the first 3
+                if self.debug:
                     print(f"  Prediction for '{diagnosis}' and '{date}': {prob:.4f}")
+                """
                 
                 prediction_count += 1
                 
@@ -220,6 +232,7 @@ class CustomExtractor(BaseRelationExtractor):
         
         if self.debug:
             print("\n===== DIAGNOSTIC: FINAL RELATIONSHIP SELECTIONS =====")
+            # Remove the full note text print since it's now in the comparison section
         
         for entity_key, predictions in entity_predictions.items():
             if predictions:

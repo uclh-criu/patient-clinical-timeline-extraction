@@ -341,12 +341,13 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length):
     
     return train_dataset, val_dataset, tokenizer
 
-def train_bert_model(model, train_loader, val_loader, optimizer, scheduler, num_epochs, device, model_path):
+def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, scheduler, num_epochs, device, model_path):
     """
     Train the BERT model for entity-date relationship extraction.
     
     Args:
         model: The BERT model
+        tokenizer: The BERT tokenizer to save alongside the model
         train_loader: DataLoader for training data
         val_loader: DataLoader for validation data
         optimizer: Optimizer for training
@@ -468,7 +469,8 @@ def train_bert_model(model, train_loader, val_loader, optimizer, scheduler, num_
                 
                 # Save model and tokenizer
                 model.save_pretrained(model_path)
-                print(f"Model saved to {model_path}")
+                tokenizer.save_pretrained(model_path)
+                print(f"Model and tokenizer saved to {model_path}")
     
     return train_losses, val_losses, val_accuracies
 
