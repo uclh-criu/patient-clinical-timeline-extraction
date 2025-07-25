@@ -15,6 +15,38 @@ import pandas as pd
 # Add dotenv for OpenAI API keys
 from dotenv import load_dotenv
 
+def safe_json_loads(data_string):
+    """
+    Safely parses a JSON-like string.
+    Tries json.loads first, then ast.literal_eval for single quotes and Python literals.
+    Handles JSON's true/false/null for ast.literal_eval.
+
+    Args:
+        data_string (str): The string to parse.
+
+    Returns:
+        A Python object (e.g., dict, list).
+
+    Raises:
+        json.JSONDecodeError: if parsing fails with all methods.
+    """
+    if not isinstance(data_string, str):
+        # To mimic json.loads, which raises TypeError for non-str/bytes/bytearray
+        raise TypeError(f"the JSON object must be str, bytes or bytearray, not {type(data_string).__name__}")
+    
+    try:
+        return json.loads(data_string)
+    except json.JSONDecodeError as e:
+        try:
+            # ast.literal_eval can't handle 'true', 'false', 'null'. Let's replace them.
+            s = re.sub(r'\btrue\b', 'True', data_string, flags=re.IGNORECASE)
+            s = re.sub(r'\bfalse\b', 'False', s, flags=re.IGNORECASE)
+            s = re.sub(r'\bnull\b', 'None', s)
+            return ast.literal_eval(s)
+        except (ValueError, SyntaxError, MemoryError) as e2:
+            # If all else fails, raise the original error to be caught by the caller.
+            raise json.JSONDecodeError(f"Failed to parse with all methods: {e2}", data_string, 0) from e
+
 # Clean and preprocess text for model input
 def preprocess_text(text):
     # Convert to lowercase
@@ -50,8 +82,10 @@ def get_data_path(config):
         return config.NOTES_DATA_PATH
     elif data_source == 'letters':
         return config.LETTERS_DATA_PATH
+    elif data_source == 'nph':
+        return config.NPH_DATA_PATH
     else:
-        raise ValueError(f"Unknown data source: {data_source}. Valid options are: 'synthetic', 'synthetic_updated', 'sample', 'imaging', 'notes', 'letters'")
+        raise ValueError(f"Unknown data source: {data_source}. Valid options are: 'synthetic', 'synthetic_updated', 'sample', 'imaging', 'notes', 'letters', 'nph'")
 
 def load_and_prepare_data(dataset_path, num_samples, config=None):
     """
@@ -178,7 +212,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                 if pd.notna(gold_data) and gold_data:
                     try:
                         # Parse the JSON string in the gold standard column
-                        gold_json = json.loads(gold_data)
+                        gold_json = safe_json_loads(gold_data)
                         
                         # Check if this is the enhanced format (array of objects) or original format (object with 'relationships')
                         if isinstance(gold_json, list):
@@ -278,7 +312,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                 if pd.notna(gold_data) and gold_data:
                     try:
                         # Parse the JSON string in the gold standard column
-                        gold_json = json.loads(gold_data)
+                        gold_json = safe_json_loads(gold_data)
                         
                         # Process each entity in the gold standard
                         for entity in gold_json:
@@ -368,7 +402,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                             diagnoses_list = []
                             # Transform Python-style string to valid JSON before parsing
                             valid_diagnoses_json = transform_python_to_json(diagnoses_data)
-                            disorders = json.loads(valid_diagnoses_json)
+                            disorders = safe_json_loads(valid_diagnoses_json)
                             for disorder in disorders:
                                 label = disorder.get('label', '')
                                 start_pos = disorder.get('start', 0)
@@ -378,7 +412,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                             dates_list = []
                             # Transform Python-style string to valid JSON before parsing
                             valid_dates_json = transform_python_to_json(dates_data)
-                            formatted_dates = json.loads(valid_dates_json)
+                            formatted_dates = safe_json_loads(valid_dates_json)
                             for date_obj in formatted_dates:
                                 parsed_date = date_obj.get('parsed', '')
                                 original_date = date_obj.get('original', '')
@@ -454,7 +488,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                         try:
                             # Transform Python-style string to valid JSON before parsing
                             valid_dates_json = transform_python_to_json(dates_data)
-                            formatted_dates = json.loads(valid_dates_json)
+                            formatted_dates = safe_json_loads(valid_dates_json)
                             for date_obj in formatted_dates:
                                 parsed_date = date_obj.get('parsed', '')
                                 original_date = date_obj.get('original', '')
@@ -1369,7 +1403,7 @@ JSON RESULT:"""
                 print(f"Found JSON array: {json_str[:100]}...")
             
             try:
-                dates_data = json.loads(json_str)
+                dates_data = safe_json_loads(json_str)
                 if dates_data and debug_mode:
                     print(f"Successfully parsed JSON with {len(dates_data)} results")
                 
@@ -1554,7 +1588,7 @@ JSON RESULT:"""
             json_str = response_content[start_idx:end_idx]
             
             try:
-                dates_data = json.loads(json_str)
+                dates_data = safe_json_loads(json_str)
                 
                 # Convert to the expected tuple format
                 relative_dates = []
