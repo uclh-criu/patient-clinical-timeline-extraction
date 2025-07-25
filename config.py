@@ -20,16 +20,9 @@ LLAMA_MODEL_PATH = './Llama-3.2-3B-Instruct'
 BERT_MODEL_PATH = './model_training/bert_model'
 
 # --- Execution Settings --- #
-# Mode to run when main.py is executed.
-# Valid options: 'evaluate', 'compare'
-RUN_MODE = 'evaluate'
-
-# Extraction method to use (relevant for 'evaluate' mode).
+# Extraction method to use for evaluation.
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
 EXTRACTION_METHOD = 'naive'
-
-# Methods to include when running in 'compare' mode
-COMPARISON_METHODS = ['naive', 'custom', 'bert']
 
 # Whether to generate patient timeline visualizations
 GENERATE_PATIENT_TIMELINES = False
