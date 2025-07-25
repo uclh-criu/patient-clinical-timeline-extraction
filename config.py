@@ -8,7 +8,7 @@ DATA_SOURCE = 'synthetic_updated'
 # --- Entity Mode Setting --- #
 # Controls which entity types to extract
 # Valid options: 'disorder_only', 'multi_entity'
-ENTITY_MODE = 'multi_entity'
+ENTITY_MODE = "multi_entity"
 
 # --- LLM (OpenAI) Extractor Parameters --- #
 OPENAI_MODEL = 'gpt-4o'
@@ -26,7 +26,7 @@ RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'naive'
+EXTRACTION_METHOD = 'custom'
 
 # Methods to include when running in 'compare' mode
 COMPARISON_METHODS = ['naive', 'custom', 'bert']
