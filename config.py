@@ -17,7 +17,7 @@ OPENAI_MODEL = 'gpt-4o'
 LLAMA_MODEL_PATH = './Llama-3.2-3B-Instruct'
 
 # --- BERT Extractor Parameters --- #
-BERT_MODEL_PATH = './model_training/bert_model'
+BERT_MODEL_PATH = './bert_model_training/bert_model'
 
 # --- Execution Settings --- #
 # Extraction method to use for evaluation.
@@ -78,8 +78,8 @@ PREDICTION_MAX_CONTEXT_LEN = 512
 PROXIMITY_MAX_DISTANCE = 200  
 
 # --- File Paths (Custom Model) --- #
-MODEL_PATH = 'model_training/best_model.pt'  
-VOCAB_PATH = 'model_training/vocab.pt'      
+MODEL_PATH = 'custom_model_training/best_model.pt'  
+VOCAB_PATH = 'custom_model_training/vocab.pt'      
 
 # --- RelCAT Extractor Parameters --- #
 # Ensure these paths are correct for your setup

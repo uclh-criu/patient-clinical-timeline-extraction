@@ -11,8 +11,8 @@ sys.path.append(project_root)
 
 # Import configuration
 import config
-import model_training.training_config as training_config
-from model_training.BertEntityPairDataset import BertEntityPairDataset
+import training_config_bert as training_config
+from BertEntityPairDataset import BertEntityPairDataset
 
 # Import utility functions
 from utils.training_utils import prepare_bert_training_data, train_bert_model, plot_training_curves

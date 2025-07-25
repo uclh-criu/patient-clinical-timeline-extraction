@@ -1,5 +1,8 @@
 import torch
 
+# --- Hardware Configuration --- #
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  # Device to use for training 
+
 # --- Custom Model Training Configuration --- #
 TRAINING_DATA_PATH = 'data/synthetic.csv'  # Path to training data
 MAX_DISTANCE = 500  # Maximum distance between diagnosis and date to consider
@@ -15,16 +18,3 @@ DROPOUT = 0.3  # Dropout rate for regularization
 USE_DISTANCE_FEATURE = True  # Whether to use distance between diagnosis and date as a feature
 USE_POSITION_FEATURE = True  # Whether to use relative position (diagnosis before date) as a feature
 TEST_SIZE = 0.2  # Proportion of data to use for testing
-
-# --- BERT Model Configuration --- #
-# BERT Training Data
-BERT_TRAINING_DATA_PATH = 'data/synthetic.csv'  # Data to train BERT model on
-BERT_PRETRAINED_MODEL = 'dmis-lab/biobert-base-cased-v1.1'  # Pre-trained model to use
-BERT_MAX_SEQ_LENGTH = 512  # Maximum sequence length for BERT
-BERT_BATCH_SIZE = 8  # Batch size for BERT training
-BERT_LEARNING_RATE = 2e-5  # Learning rate for BERT fine-tuning
-BERT_NUM_TRAIN_EPOCHS = 3  # Number of epochs for BERT fine-tuning
-BERT_CONFIDENCE_THRESHOLD = 0.185  # Confidence threshold for BERT predictions
-
-# --- Hardware Configuration --- #
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  # Device to use for training 

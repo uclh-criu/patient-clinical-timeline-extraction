@@ -14,9 +14,9 @@ sys.path.append(project_root)
 # Import from our modules using adjusted paths
 # Files within the same directory (model_training)
 from DiagnosisDateRelationModel import DiagnosisDateRelationModel 
-from model_training.Vocabulary import Vocabulary
-from ClinicalNoteDataset import ClinicalNoteDataset
-import training_config 
+from custom_model_training.Vocabulary import Vocabulary
+from custom_model_training.ClinicalNoteDataset import ClinicalNoteDataset
+import custom_model_training.training_config_custom as training_config_custom 
 
 # Files from other top-level directories
 from utils.training_utils import prepare_custom_training_data
@@ -56,7 +56,7 @@ def train():
         sys.exit(1)
     
     # Step 1: Load training data from the path specified in training_config
-    training_data_path = os.path.join(project_root, training_config.TRAINING_DATA_PATH)
+    training_data_path = os.path.join(project_root, training_config_custom.TRAINING_DATA_PATH)
     
     if not os.path.exists(training_data_path):
         print(f"Error: Training data file not found at {training_data_path}")
@@ -68,7 +68,7 @@ def train():
     # This will directly load the CSV file and parse all entities and relationships
     print("Loading and preparing data...")
     features, labels, _ = prepare_custom_training_data(
-        training_data_path, training_config.MAX_DISTANCE, None
+        training_data_path, training_config_custom.MAX_DISTANCE, None
     )
     print(f"Loaded {len(features)} examples")
     
@@ -98,33 +98,33 @@ def train():
     # Create datasets using training_config settings
     train_dataset = ClinicalNoteDataset(
         train_features, train_labels, vocab_instance, 
-        training_config.MAX_CONTEXT_LEN, training_config.MAX_DISTANCE
+        training_config_custom.MAX_CONTEXT_LEN, training_config_custom.MAX_DISTANCE
     ) 
     val_dataset = ClinicalNoteDataset(
         val_features, val_labels, vocab_instance, 
-        training_config.MAX_CONTEXT_LEN, training_config.MAX_DISTANCE
+        training_config_custom.MAX_CONTEXT_LEN, training_config_custom.MAX_DISTANCE
     )
     
     # Create data loaders using training_config batch size
-    train_loader = DataLoader(train_dataset, batch_size=training_config.BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=training_config.BATCH_SIZE)
+    train_loader = DataLoader(train_dataset, batch_size=training_config_custom.BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=training_config_custom.BATCH_SIZE)
     
     # Step 4: Initialize and train model using training_config settings
     model = DiagnosisDateRelationModel(
         vocab_size=vocab_instance.n_words, 
-        embedding_dim=training_config.EMBEDDING_DIM,
-        hidden_dim=training_config.HIDDEN_DIM
+        embedding_dim=training_config_custom.EMBEDDING_DIM,
+        hidden_dim=training_config_custom.HIDDEN_DIM
     ).to(DEVICE)
     
     # Loss function and optimizer using training_config learning rate
     criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=training_config.LEARNING_RATE)
+    optimizer = optim.Adam(model.parameters(), lr=training_config_custom.LEARNING_RATE)
     
     # Train model using training_config epochs
     print("Training model...")
     train_losses, val_losses, val_accs = train_model(
         model, train_loader, val_loader, optimizer, criterion, 
-        training_config.NUM_EPOCHS, DEVICE, model_full_path
+        training_config_custom.NUM_EPOCHS, DEVICE, model_full_path
     )
     
     # Plot training curves
