@@ -23,7 +23,6 @@ from utils.extraction_utils import (
     generate_patient_timelines,
     generate_patient_timeline_summary,
     calculate_entity_metrics,
-    calculate_relationship_metrics,
     predict_pa_likelihood,
     calculate_likelihood_metrics
 )
@@ -311,26 +310,15 @@ def evaluate_on_dataset():
     print("\nCalculating relationship metrics...")
     os.makedirs(EXPERIMENT_OUTPUT_DIR, exist_ok=True)
     
-    if config.ENTITY_MODE == 'disorder_only':
-        # In disorder_only mode, use calculate_and_report_metrics
-        relationship_metrics = calculate_and_report_metrics(
-            all_predictions,
-            relationship_gold,
-            extractor.name,
-            EXPERIMENT_OUTPUT_DIR,
-            len(prepared_test_data),
-            dataset_path
-        )
-    else:
-        # In multi_entity mode, use calculate_relationship_metrics
-        relationship_metrics = calculate_relationship_metrics(
-            all_predictions,
-            relationship_gold,
-            extractor.name,
-            EXPERIMENT_OUTPUT_DIR,
-            len(prepared_test_data),
-            dataset_path
-        )
+    # Use calculate_and_report_metrics for both modes
+    relationship_metrics = calculate_and_report_metrics(
+        all_predictions,
+        relationship_gold,
+        extractor.name,
+        EXPERIMENT_OUTPUT_DIR,
+        len(prepared_test_data),
+        dataset_path
+    )
     
     # --- 4. Timeline Generation and PA Likelihood Prediction ---
     # Aggregate predictions by patient
@@ -627,26 +615,14 @@ def compare_all_methods():
             
             # Calculate relationship metrics
             print(f"Calculating relationship metrics for {extractor.name}...")
-            if config.ENTITY_MODE == 'disorder_only':
-                # In disorder_only mode, use calculate_and_report_metrics
-                relationship_metrics = calculate_and_report_metrics(
-                    all_predictions,
-                    relationship_gold,
-                    extractor.name,
-                    EXPERIMENT_OUTPUT_DIR,
-                    len(prepared_test_data),
-                    dataset_path
-                )
-            else:
-                # In multi_entity mode, use calculate_relationship_metrics
-                relationship_metrics = calculate_relationship_metrics(
-                    all_predictions,
-                    relationship_gold,
-                    extractor.name,
-                    EXPERIMENT_OUTPUT_DIR,
-                    len(prepared_test_data),
-                    dataset_path
-                )
+            relationship_metrics = calculate_and_report_metrics(
+                all_predictions,
+                relationship_gold,
+                extractor.name,
+                EXPERIMENT_OUTPUT_DIR,
+                len(prepared_test_data),
+                dataset_path
+            )
             
             # --- 3. PA Likelihood Prediction ---
             # Aggregate predictions by patient
