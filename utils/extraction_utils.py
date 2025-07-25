@@ -87,6 +87,31 @@ def get_data_path(config):
     else:
         raise ValueError(f"Unknown data source: {data_source}. Valid options are: 'synthetic', 'synthetic_updated', 'sample', 'imaging', 'notes', 'letters', 'nph'")
 
+def _parse_entity_column(data_string):
+    """Helper to parse a JSON-like string from an entity column."""
+    if not data_string or pd.isna(data_string):
+        return []
+    try:
+        # First, ensure it's valid JSON, as it may be a Python literal string
+        valid_json_string = transform_python_to_json(data_string)
+        # Then, safely load the JSON
+        entities = safe_json_loads(valid_json_string)
+        
+        # Process each entity to add a 'category' field based on 'categories'
+        for entity in entities:
+            # If entity has 'categories' but not 'category', add 'category' field
+            if 'categories' in entity and not 'category' in entity:
+                # Use the first category as the main category
+                if isinstance(entity['categories'], list) and len(entity['categories']) > 0:
+                    entity['category'] = entity['categories'][0].lower()
+                else:
+                    entity['category'] = 'unknown'
+        
+        return entities
+    except (json.JSONDecodeError, TypeError) as e:
+        print(f"Warning: Could not parse entity data string. Error: {e}. Data: '{str(data_string)[:100]}...'")
+        return []
+
 def load_and_prepare_data(dataset_path, num_samples, config=None):
     """
     Loads dataset, selects samples, prepares gold standard, and pre-extracts entities.
@@ -365,6 +390,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
             # Get the text from the specified column
             text = str(row.get(text_column, ''))
             
+            # This will hold the full dictionaries of extracted entities for NER evaluation
+            all_extracted_entities = []
+            
             # Initialize entities as empty lists in case we can't get valid annotations
             entities = ([], [])
             
@@ -449,8 +477,8 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                                     print(f"  dates_data sample: {dates_data[:100]}...")
             else:
                 # --- MULTI ENTITY MODE ENTITY EXTRACTION ---
-                # In multi_entity mode, we use parse_entities helper function
-                entities_list = []
+                # In multi_entity mode, we load pre-annotated entities from CSV columns
+                entities_list_for_rel_extraction = []
                 dates_list = []
                 
                 # Initialize column variables
@@ -462,10 +490,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                     snomed_data = row.get(snomed_column)
                     if pd.notna(snomed_data) and snomed_data:
                         try:
-                            # Remove call to undefined parse_entities function
-                            # snomed_entities = parse_entities(snomed_data, "SNOMED")
-                            snomed_entities = []  # Empty list instead of calling undefined function
-                            entities_list.extend(snomed_entities)
+                            # Parse entities from the SNOMED column
+                            snomed_entities = _parse_entity_column(snomed_data)
+                            all_extracted_entities.extend(snomed_entities)
                         except Exception as e:
                             print(f"Error parsing SNOMED entities for row {i}: {e}")
                 
@@ -474,12 +501,19 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                     umls_data = row.get(umls_column)
                     if pd.notna(umls_data) and umls_data:
                         try:
-                            # Remove call to undefined parse_entities function
-                            # umls_entities = parse_entities(umls_data, "UMLS")
-                            umls_entities = []  # Empty list instead of calling undefined function
-                            entities_list.extend(umls_entities)
+                            # Parse entities from the UMLS column
+                            umls_entities = _parse_entity_column(umls_data)
+                            all_extracted_entities.extend(umls_entities)
                         except Exception as e:
                             print(f"Error parsing UMLS entities for row {i}: {e}")
+                
+                # Convert the full entity dicts to the (label, start_pos) tuple format
+                # required by the downstream relationship extraction models.
+                for entity in all_extracted_entities:
+                    label = entity.get('label', '')
+                    start_pos = entity.get('start', 0)
+                    if label:
+                        entities_list_for_rel_extraction.append((label.lower(), start_pos))
                 
                 # Process dates
                 if dates_column and dates_column in df.columns:
@@ -498,12 +532,12 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                             print(f"Error parsing dates for row {i}: {e}")
                 
                 # Update entities tuple with the combined data
-                entities = (entities_list, dates_list)
+                entities = (entities_list_for_rel_extraction, dates_list)
                 
                 # Update counters
-                if entities_list and dates_list:
+                if entities_list_for_rel_extraction or dates_list:
                     notes_with_entities += 1
-                total_entities += len(entities_list)
+                total_entities += len(entities_list_for_rel_extraction)
                 total_dates += len(dates_list)
             
             # Process relative dates if enabled (same for both modes)
@@ -543,11 +577,11 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                             
                             if relative_dates:
                                 # Append relative dates to existing dates list
-                                entities_list, dates_list = entities
+                                entities_list_for_rel_extraction, dates_list = entities
                                 combined_dates_list = dates_list + relative_dates
                                 
                                 # Update entities with combined dates
-                                entities = (entities_list, combined_dates_list)
+                                entities = (entities_list_for_rel_extraction, combined_dates_list)
                                 
                                 # Convert relative dates to JSON for storage in CSV
                                 relative_dates_json = []
@@ -572,7 +606,8 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                 'note_id': i,
                 'patient_id': row.get(patient_id_column) if patient_id_column else None,
                 'note': text,
-                'entities': entities
+                'entities': entities,
+                'extracted_entities': all_extracted_entities  # Add this for NER evaluation
             })
             
             pbar.update(1)
