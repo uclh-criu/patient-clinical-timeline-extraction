@@ -3,12 +3,12 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used.
 # Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated', 'nph'
-DATA_SOURCE = 'synthetic_updated'
+DATA_SOURCE = 'synthetic'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to extract
 # Valid options: 'disorder_only', 'multi_entity'
-ENTITY_MODE = "multi_entity"
+ENTITY_MODE = "disorder_only"
 
 # --- LLM (OpenAI) Extractor Parameters --- #
 OPENAI_MODEL = 'gpt-4o'
@@ -26,7 +26,7 @@ RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'custom'
+EXTRACTION_METHOD = 'naive'
 
 # Methods to include when running in 'compare' mode
 COMPARISON_METHODS = ['naive', 'custom', 'bert']

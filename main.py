@@ -22,9 +22,7 @@ from utils.extraction_utils import (
     aggregate_predictions_by_patient,
     generate_patient_timelines,
     generate_patient_timeline_summary,
-    calculate_entity_metrics,
-    predict_pa_likelihood,
-    calculate_likelihood_metrics
+    calculate_entity_metrics
 )
 
 # Define the output directory using absolute path if project_root is available
@@ -272,10 +270,9 @@ def evaluate_on_dataset():
         prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
         # Set these to None as they're not used in disorder_only mode
         entity_gold = None
-        pa_likelihood_gold = None
     else:
         # In multi_entity mode, load_and_prepare_data returns 4 values
-        prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+        prepared_test_data, entity_gold, relationship_gold, _ = load_and_prepare_data(dataset_path, num_test_samples, config)
     
     if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting evaluation.")
@@ -320,24 +317,9 @@ def evaluate_on_dataset():
         dataset_path
     )
     
-    # --- 4. Timeline Generation and PA Likelihood Prediction ---
+    # --- 4. Timeline Generation ---
     # Aggregate predictions by patient
     patient_timelines = aggregate_predictions_by_patient(all_predictions)
-    
-    # Predict PA likelihood and calculate metrics
-    if config.ENTITY_MODE == 'disorder_only':
-        # Skip PA likelihood prediction in disorder_only mode
-        predicted_likelihoods = {}
-        likelihood_metrics = {
-            'mse': 0,
-            'mae': 0,
-            'r2': 0
-        }
-    else:
-        # Predict PA likelihood
-        predicted_likelihoods = predict_pa_likelihood(patient_timelines)
-        # Evaluate likelihood predictions
-        likelihood_metrics = calculate_likelihood_metrics(predicted_likelihoods, pa_likelihood_gold, EXPERIMENT_OUTPUT_DIR)
     
     # Save predictions to CSV
     print(f"\nSaving predictions to {dataset_path}...")
@@ -350,7 +332,6 @@ def evaluate_on_dataset():
         safe_extractor_name = extractor.name.lower().replace(' ', '_')
         predictions_column = f"{safe_extractor_name}_predictions"
         correctness_column = f"{safe_extractor_name}_is_correct"
-        pa_likelihood_column = f"{safe_extractor_name}_pa_likelihood"
         
         # Create dictionaries to hold predictions and correctness by note_id
         note_predictions = {}
@@ -451,10 +432,6 @@ def evaluate_on_dataset():
         if relationship_gold:
             df[correctness_column] = None
             
-        # Add PA likelihood predictions to dataframe
-        if predicted_likelihoods:
-            df[pa_likelihood_column] = None
-            
         # Fill in predictions and correctness columns
         for i, row in df.iterrows():
             if i in note_predictions:
@@ -463,18 +440,15 @@ def evaluate_on_dataset():
                 if i in note_correctness:
                     df.at[i, correctness_column] = json.dumps(note_correctness[i])
             
-            # Add PA likelihood prediction if available
+            # Get patient_id for reference (may be used elsewhere)
             patient_id = row.get(config.REAL_DATA_PATIENT_ID_COLUMN)
-            if patient_id in predicted_likelihoods:
-                df.at[i, pa_likelihood_column] = predicted_likelihoods[patient_id]
         
         # Save the updated dataframe back to CSV
         df.to_csv(dataset_path, index=False)
         print(f"Successfully saved predictions to column '{predictions_column}'")
         if relationship_gold:
             print(f"Successfully saved correctness indicators to column '{correctness_column}'")
-        if predicted_likelihoods:
-            print(f"Successfully saved PA likelihood predictions to column '{pa_likelihood_column}'")
+
             
     except Exception as e:
         print(f"Error saving predictions to CSV: {e}")
@@ -495,8 +469,9 @@ def evaluate_on_dataset():
         # Generate visual timeline plots
         generate_patient_timeline_visualizations(patient_timelines, timeline_output_dir, extractor.name)
     
-    # Print summary of all evaluations
+    # Print evaluation summary
     print("\n=== EVALUATION SUMMARY ===")
+    
     print("Entity Extraction (NER):")
     print(f"  Precision: {entity_metrics['precision']:.3f}")
     print(f"  Recall:    {entity_metrics['recall']:.3f}")
@@ -506,11 +481,6 @@ def evaluate_on_dataset():
     print(f"  Precision: {relationship_metrics['precision']:.3f}")
     print(f"  Recall:    {relationship_metrics['recall']:.3f}")
     print(f"  F1 Score:  {relationship_metrics['f1']:.3f}")
-    
-    print("\nPA Likelihood Prediction:")
-    print(f"  MSE: {likelihood_metrics['mse']:.4f}")
-    print(f"  MAE: {likelihood_metrics['mae']:.4f}")
-    print(f"  R²:  {likelihood_metrics['r2']:.4f}")
     
     print("\nEvaluation Done!")
 
@@ -546,10 +516,9 @@ def compare_all_methods():
         prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
         # Set these to None as they're not used in disorder_only mode
         entity_gold = None
-        pa_likelihood_gold = None
     else:
         # In multi_entity mode, load_and_prepare_data returns 4 values
-        prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+        prepared_test_data, entity_gold, relationship_gold, _ = load_and_prepare_data(dataset_path, num_test_samples, config)
     
     if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting comparison.")
@@ -590,16 +559,15 @@ def compare_all_methods():
     # Evaluate each extractor
     all_method_metrics = {}
     all_method_predictions = {}
-    all_method_pa_likelihoods = {}
     
     # For CSV updates
-    original_df = None
+    df = None
     try:
-        original_df = pd.read_csv(dataset_path)
-        print(f"Loaded original CSV with {len(original_df)} rows")
+        df = pd.read_csv(dataset_path)
+        print(f"Loaded original CSV with {len(df)} rows")
     except Exception as e:
         print(f"Warning: Could not load original CSV for saving predictions: {e}")
-        original_df = None
+        df = None
     
     # Determine if we're in disorder_only mode
     disorder_only_mode = (config.ENTITY_MODE == 'disorder_only')
@@ -624,31 +592,12 @@ def compare_all_methods():
                 dataset_path
             )
             
-            # --- 3. PA Likelihood Prediction ---
             # Aggregate predictions by patient
             patient_timelines = aggregate_predictions_by_patient(all_predictions)
             
-            # Predict PA likelihood and calculate metrics
-            if config.ENTITY_MODE == 'disorder_only':
-                # Skip PA likelihood prediction in disorder_only mode
-                predicted_likelihoods = {}
-                likelihood_metrics = {
-                    'mse': 0,
-                    'mae': 0,
-                    'r2': 0
-                }
-            else:
-                # Predict PA likelihood
-                predicted_likelihoods = predict_pa_likelihood(patient_timelines)
-                # Evaluate likelihood predictions
-                likelihood_metrics = calculate_likelihood_metrics(predicted_likelihoods, pa_likelihood_gold, EXPERIMENT_OUTPUT_DIR)
-            
-            all_method_pa_likelihoods[extractor.name] = predicted_likelihoods
-            
-            # Store all metrics
+            # Store metrics
             all_method_metrics[extractor.name] = {
-                'relationship': relationship_metrics,
-                'likelihood': likelihood_metrics
+                'relationship': relationship_metrics
             }
             
             # Generate patient timelines if configured
@@ -666,11 +615,16 @@ def compare_all_methods():
                 generate_patient_timeline_visualizations(patient_timelines, timeline_output_dir, extractor.name)
             
             # Save predictions to CSV if applicable
-            if original_df is not None:
+            if df is not None:
                 safe_extractor_name = extractor.name.lower().replace(' ', '_')
                 predictions_column = f"{safe_extractor_name}_predictions"
                 correctness_column = f"{safe_extractor_name}_is_correct"
-                pa_likelihood_column = f"{safe_extractor_name}_pa_likelihood"
+                
+                # Add columns to dataframe if they don't exist
+                if predictions_column not in df.columns:
+                    df[predictions_column] = None
+                if correctness_column not in df.columns:
+                    df[correctness_column] = None
                 
                 # Create dictionaries to hold predictions and correctness by note_id
                 note_predictions = {}
@@ -764,40 +718,25 @@ def compare_all_methods():
                         note_correctness[note_id].append(is_correct)
                 
                 # Add predictions to dataframe
-                original_df[predictions_column] = None
-                if relationship_gold:
-                    original_df[correctness_column] = None
-                
-                # Add PA likelihood predictions to dataframe
-                if predicted_likelihoods:
-                    original_df[pa_likelihood_column] = None
+                for i, row in df.iterrows():
+                    note_id = row.get('note_id', i)
                     
-                # Fill in predictions and correctness columns
-                for i, row in original_df.iterrows():
-                    if i in note_predictions:
-                        original_df.at[i, predictions_column] = json.dumps(note_predictions[i])
-                        
-                        if i in note_correctness:
-                            original_df.at[i, correctness_column] = json.dumps(note_correctness[i])
+                    # Add predictions
+                    if note_id in note_predictions:
+                        df.at[i, predictions_column] = json.dumps(note_predictions[note_id])
                     
-                    # Add PA likelihood prediction if available
-                    patient_id = row.get(config.REAL_DATA_PATIENT_ID_COLUMN)
-                    if patient_id in predicted_likelihoods:
-                        original_df.at[i, pa_likelihood_column] = predicted_likelihoods[patient_id]
+                    # Add correctness indicators
+                    if note_id in note_correctness:
+                        df.at[i, correctness_column] = json.dumps(note_correctness[note_id])
                 
-                print(f"Added predictions for {extractor.name} to CSV columns")
+                # Save the updated dataframe
+                try:
+                    df.to_csv(dataset_path, index=False)
+                    print(f"Successfully saved predictions to {dataset_path}")
+                except Exception as e:
+                    print(f"Error saving predictions to CSV: {e}")
             
             pbar.update(1)
-    
-    # Save the updated dataframe back to CSV
-    if original_df is not None:
-        try:
-            original_df.to_csv(dataset_path, index=False)
-            print(f"Successfully saved all predictions to {dataset_path}")
-        except Exception as e:
-            print(f"Error saving predictions to CSV: {e}")
-            import traceback
-            traceback.print_exc()
     
     # Print final comparison summary
     print("\n=== FINAL COMPARISON SUMMARY ===")
@@ -815,14 +754,6 @@ def compare_all_methods():
     for method_name, metrics in all_method_metrics.items():
         rel_metrics = metrics['relationship']
         print(f"{method_name:<20} {rel_metrics['precision']:.3f}{'':>5} {rel_metrics['recall']:.3f}{'':>5} {rel_metrics['f1']:.3f}{'':>5}")
-    
-    # PA likelihood metrics comparison
-    print("\nPA Likelihood Prediction Metrics:")
-    print(f"{'Method':<20} {'MSE':<10} {'MAE':<10} {'R²':<10}")
-    print("-" * 50)
-    for method_name, metrics in all_method_metrics.items():
-        pa_metrics = metrics['likelihood']
-        print(f"{method_name:<20} {pa_metrics['mse']:.4f}{'':>5} {pa_metrics['mae']:.4f}{'':>5} {pa_metrics['r2']:.4f}{'':>5}")
     
     # Generate comparison plots
     plot_comparison(all_method_metrics)
@@ -842,7 +773,6 @@ def plot_comparison(method_metrics):
     os.makedirs(EXPERIMENT_OUTPUT_DIR, exist_ok=True)
     print("\nGenerating comparison plots...")
     
-    # --- 1. Plot Relationship Metrics ---
     # Extract relationship metrics into a DataFrame
     relationship_data = {}
     for method_name, metrics in method_metrics.items():
@@ -876,55 +806,6 @@ def plot_comparison(method_metrics):
         plt.close()
     except Exception as e:
         print(f"Error generating relationship comparison plot: {e}")
-    
-    # --- 2. Plot PA Likelihood Metrics ---
-    # Extract likelihood metrics into a DataFrame
-    likelihood_data = {}
-    for method_name, metrics in method_metrics.items():
-        pa_metrics = metrics['likelihood']
-        likelihood_data[method_name] = {
-            'mse': pa_metrics.get('mse', 0),
-            'mae': pa_metrics.get('mae', 0),
-            'r2': pa_metrics.get('r2', 0)
-        }
-    
-    likelihood_df = pd.DataFrame(likelihood_data).T
-    
-    print("\nPA Likelihood Prediction Comparison Results:")
-    print(likelihood_df.round(4))
-    
-    try:
-        plt.figure(figsize=(10, 6))
-        # MSE and MAE are error metrics (lower is better), so we'll plot them separately
-        likelihood_df[['r2']].plot(kind='bar', rot=0, color='green')
-        plt.title(f'PA Likelihood R² Comparison - {config.DATA_SOURCE.capitalize()} Data')
-        plt.ylabel('R² Score')
-        plt.xlabel('Method')
-        plt.ylim(0, 1.05)
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        
-        r2_plot_path = os.path.join(EXPERIMENT_OUTPUT_DIR, f"{config.DATA_SOURCE}_likelihood_r2_comparison.png")
-        plt.savefig(r2_plot_path)
-        print(f"PA Likelihood R² comparison plot saved to {r2_plot_path}")
-        plt.close()
-        
-        # Plot error metrics
-        plt.figure(figsize=(10, 6))
-        likelihood_df[['mse', 'mae']].plot(kind='bar', rot=0, color=['red', 'orange'])
-        plt.title(f'PA Likelihood Error Metrics - {config.DATA_SOURCE.capitalize()} Data')
-        plt.ylabel('Error Value')
-        plt.xlabel('Method')
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        plt.legend(title='Metric')
-        plt.tight_layout()
-        
-        error_plot_path = os.path.join(EXPERIMENT_OUTPUT_DIR, f"{config.DATA_SOURCE}_likelihood_error_comparison.png")
-        plt.savefig(error_plot_path)
-        print(f"PA Likelihood error metrics comparison plot saved to {error_plot_path}")
-        plt.close()
-    except Exception as e:
-        print(f"Error generating PA likelihood comparison plots: {e}")
 
 if __name__ == "__main__":
     # Read mode and method directly from config
