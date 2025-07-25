@@ -31,7 +31,7 @@ class BertExtractor(BaseRelationExtractor):
             print(f"Warning: Could not load training_config. Using default values. Error: {e}")
             self.pretrained_model_name = 'dmis-lab/biobert-base-cased-v1.1'
             self.max_seq_length = 512
-            self.confidence_threshold = 0.2  # Lower threshold
+            self.confidence_threshold = 0.185  # Lower threshold
         
         # Initialize model and tokenizer as None (will be loaded in load())
         self.model = None

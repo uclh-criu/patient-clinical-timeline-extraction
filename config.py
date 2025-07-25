@@ -2,13 +2,13 @@ import torch
 
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used.
-# Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated'
-DATA_SOURCE = 'synthetic'
+# Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated', 'nph'
+DATA_SOURCE = 'nph'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to extract
 # Valid options: 'disorder_only', 'multi_entity'
-ENTITY_MODE = 'disorder_only'
+ENTITY_MODE = 'multi_entity'
 
 # --- LLM (OpenAI) Extractor Parameters --- #
 OPENAI_MODEL = 'gpt-4o'
@@ -26,7 +26,7 @@ RUN_MODE = 'evaluate'
 
 # Extraction method to use (relevant for 'evaluate' mode).
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'custom'
+EXTRACTION_METHOD = 'naive'
 
 # Methods to include when running in 'compare' mode
 COMPARISON_METHODS = ['naive', 'custom', 'bert']
@@ -53,6 +53,7 @@ SYNTHETIC_UPDATED_DATA_PATH = 'data/synthetic_updated.csv'
 IMAGING_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging_labelled.csv'
 NOTES_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_notes.csv'
 LETTERS_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_letters.csv'
+NPH_DATA_PATH = 'data/synthetic_results_final.csv'
 
 # --- Data Column Names --- #
 REAL_DATA_PATIENT_ID_COLUMN = 'patient'     # Column containing patient identifiers
