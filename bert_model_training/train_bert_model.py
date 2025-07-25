@@ -1,8 +1,7 @@
 import os
 import sys
-import torch
-from torch.utils.data import DataLoader, random_split
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, AdamW
+from torch.utils.data import DataLoader
+from transformers import AutoModelForSequenceClassification, AdamW
 from transformers import get_linear_schedule_with_warmup
 
 # Adjust relative paths for imports
@@ -12,10 +11,10 @@ sys.path.append(project_root)
 # Import configuration
 import config
 import training_config_bert as training_config
-from BertEntityPairDataset import BertEntityPairDataset
 
 # Import utility functions
-from utils.training_utils import prepare_bert_training_data, train_bert_model, plot_training_curves
+from training_utils_bert import prepare_bert_training_data, train_bert_model
+from custom_model_training.training_utils_custom import plot_training_curves
 
 def main():
     """

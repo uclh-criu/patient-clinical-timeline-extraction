@@ -10,9 +10,9 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 # Import from our modules
-from model_training.Vocabulary import Vocabulary
-import model_training.training_config as training_config
-from utils.training_utils import preprocess_text
+from custom_model_training.Vocabulary import Vocabulary
+import custom_model_training.training_config_custom as training_config
+from custom_model_training.training_utils_custom import preprocess_text
 from config import VOCAB_PATH
 
 def build_vocabulary():

@@ -19,8 +19,8 @@ from custom_model_training.ClinicalNoteDataset import ClinicalNoteDataset
 import custom_model_training.training_config_custom as training_config_custom 
 
 # Files from other top-level directories
-from utils.training_utils import prepare_custom_training_data
-from utils.training_utils import train_model, plot_training_curves
+from custom_model_training.training_utils_custom import prepare_custom_training_data
+from custom_model_training.training_utils_custom import train_model, plot_training_curves
 from config import DEVICE, MODEL_PATH, VOCAB_PATH
 
 def train():
