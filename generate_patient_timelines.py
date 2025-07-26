@@ -58,11 +58,11 @@ def create_patient_timelines():
         print(f"Found predictions column: {predictions_column}")
         
         # Check if patient ID column is available
-        if not hasattr(config, 'REAL_DATA_PATIENT_ID_COLUMN'):
-            print("Error: REAL_DATA_PATIENT_ID_COLUMN not defined in config.")
+        if not hasattr(config, 'PATIENT_ID_COLUMN'):
+            print("Error: PATIENT_ID_COLUMN not defined in config.")
             sys.exit(1)
             
-        patient_id_col = config.REAL_DATA_PATIENT_ID_COLUMN
+        patient_id_col = config.PATIENT_ID_COLUMN
         if patient_id_col not in df.columns:
             print(f"Error: Patient ID column '{patient_id_col}' not found in CSV.")
             sys.exit(1)

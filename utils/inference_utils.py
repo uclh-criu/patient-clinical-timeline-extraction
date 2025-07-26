@@ -178,29 +178,29 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
         print(f"Error: No dataset path provided and could not determine path from config")
         return (None, None) if disorder_only_mode else (None, None, None, None)
     
-    text_column = config.REAL_DATA_TEXT_COLUMN
-    patient_id_column = getattr(config, 'REAL_DATA_PATIENT_ID_COLUMN', None)
+    text_column = config.TEXT_COLUMN
+    patient_id_column = getattr(config, 'PATIENT_ID_COLUMN', None)
     
     # Get column names for gold standards
     entity_gold_col = getattr(config, 'ENTITY_GOLD_COLUMN', None)
     relationship_gold_col = getattr(config, 'RELATIONSHIP_GOLD_COLUMN', None)
     pa_likelihood_gold_col = getattr(config, 'PA_LIKELIHOOD_GOLD_COLUMN', None)
-    legacy_gold_col = getattr(config, 'REAL_DATA_GOLD_COLUMN', None)
+    legacy_gold_col = getattr(config, 'RELATIONSHIP_GOLD_COLUMN', None)
     
     # Determine which columns to use for entity extraction based on mode
     if disorder_only_mode:
         # In disorder_only mode, we use diagnoses_column for disorders
-        diagnoses_column = getattr(config, 'REAL_DATA_DIAGNOSES_COLUMN', None)
-        dates_column = getattr(config, 'REAL_DATA_DATES_COLUMN', None)
+        diagnoses_column = getattr(config, 'DIAGNOSES_COLUMN', None)
+        dates_column = getattr(config, 'DATES_COLUMN', None)
         print(f"Using disorder_only mode with columns: diagnoses={diagnoses_column}, dates={dates_column}")
     else:
         # In multi_entity mode, we use snomed_column and umls_column for entities
-        snomed_column = getattr(config, 'REAL_DATA_SNOMED_COLUMN', None)
-        umls_column = getattr(config, 'REAL_DATA_UMLS_COLUMN', None)
-        dates_column = getattr(config, 'REAL_DATA_DATES_COLUMN', None)
+        snomed_column = getattr(config, 'SNOMED_COLUMN', None)
+        umls_column = getattr(config, 'UMLS_COLUMN', None)
+        dates_column = getattr(config, 'DATES_COLUMN', None)
         print(f"Using multi_entity mode with columns: snomed={snomed_column}, umls={umls_column}, dates={dates_column}")
     
-    timestamp_column = getattr(config, 'REAL_DATA_TIMESTAMP_COLUMN', None)
+    timestamp_column = getattr(config, 'TIMESTAMP_COLUMN', None)
     
     # Print available columns for debugging
     print(f"Dataset path: {dataset_path}")
@@ -492,8 +492,8 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                 dates_list = []
                 
                 # Initialize column variables
-                snomed_column = config.REAL_DATA_SNOMED_COLUMN if hasattr(config, 'REAL_DATA_SNOMED_COLUMN') else None
-                umls_column = config.REAL_DATA_UMLS_COLUMN if hasattr(config, 'REAL_DATA_UMLS_COLUMN') else None
+                snomed_column = config.SNOMED_COLUMN if hasattr(config, 'SNOMED_COLUMN') else None
+                umls_column = config.UMLS_COLUMN if hasattr(config, 'UMLS_COLUMN') else None
                 
                 # Process SNOMED entities if available
                 if snomed_column and snomed_column in df.columns:

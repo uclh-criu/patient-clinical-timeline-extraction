@@ -28,8 +28,8 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length):
     # Ensure config has the necessary attributes for BERT training
     if not hasattr(config, 'RELATIONSHIP_GOLD_COLUMN'):
         setattr(config, 'RELATIONSHIP_GOLD_COLUMN', 'relationship_gold')
-    if not hasattr(config, 'REAL_DATA_DATES_COLUMN'):
-        setattr(config, 'REAL_DATA_DATES_COLUMN', 'formatted_dates')
+    if not hasattr(config, 'DATES_COLUMN'):
+        setattr(config, 'DATES_COLUMN', 'formatted_dates')
     if not hasattr(config, 'ENTITY_MODE'):
         setattr(config, 'ENTITY_MODE', 'disorder_only')
     if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):

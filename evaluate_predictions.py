@@ -91,8 +91,8 @@ def evaluate_predictions():
                     pred['note_id'] = i
                     
                     # If patient_id column exists, add it too
-                    if hasattr(config, 'REAL_DATA_PATIENT_ID_COLUMN'):
-                        patient_id_col = config.REAL_DATA_PATIENT_ID_COLUMN
+                    if hasattr(config, 'PATIENT_ID_COLUMN'):
+                        patient_id_col = config.PATIENT_ID_COLUMN
                         if patient_id_col in row:
                             pred['patient_id'] = row[patient_id_col]
                     

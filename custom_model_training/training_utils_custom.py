@@ -56,8 +56,8 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
         # Make sure we have the necessary config attributes for training
         if not hasattr(config, 'RELATIONSHIP_GOLD_COLUMN'):
             setattr(config, 'RELATIONSHIP_GOLD_COLUMN', 'relationship_gold')
-        if not hasattr(config, 'REAL_DATA_DATES_COLUMN'):
-            setattr(config, 'REAL_DATA_DATES_COLUMN', 'formatted_dates')
+        if not hasattr(config, 'DATES_COLUMN'):
+            setattr(config, 'DATES_COLUMN', 'formatted_dates')
         if not hasattr(config, 'ENTITY_MODE'):
             setattr(config, 'ENTITY_MODE', 'disorder_only')
         if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):
