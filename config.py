@@ -24,8 +24,7 @@ BERT_MODEL_PATH = './bert_model_training/bert_model'
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
 EXTRACTION_METHOD = 'naive'
 
-# Whether to generate patient timeline visualizations
-GENERATE_PATIENT_TIMELINES = False
+# Output directory for timeline visualizations
 TIMELINE_OUTPUT_DIR = 'experiment_outputs/timelines'
 
 # --- Debug Settings --- #

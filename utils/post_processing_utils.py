@@ -1,5 +1,9 @@
 import re
 import os
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+from datetime import datetime
+import pandas as pd
 
 def aggregate_predictions_by_patient(all_predictions):
     """
@@ -145,3 +149,222 @@ def generate_patient_timeline_summary(patient_timelines, output_dir, extractor_n
                 f.write(f"Patient {patient_id}: No entities\n")
     
     print(f"Generated patient timeline summary: {summary_path}")
+
+def generate_patient_timeline_visualizations(patient_timelines, output_dir, extractor_name):
+    """
+    Generates and saves timeline visualizations for each patient based on aggregated timeline data.
+
+    Args:
+        patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
+                                  Format: {patient_id: [{'entity_label': str, 'entity_category': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
+        output_dir (str): Directory to save the timeline plots.
+        extractor_name (str): Name of the extractor for file naming.
+    """
+    if not patient_timelines:
+        print(f"No patient timelines to visualize for {extractor_name}")
+        return
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    for patient_id, timeline in tqdm(patient_timelines.items(), desc="Generating timeline visualizations", unit="patient"):
+        if not timeline:
+            continue
+            
+        try:
+            # Prepare data for visualization
+            parsed_dates = []
+            entity_labels = []
+            entity_categories = []
+            confidences = []
+            note_ids = []
+            
+            for entry in timeline:
+                date_str = entry.get('date')
+                entity_label = entry.get('entity_label')
+                entity_category = entry.get('entity_category', 'unknown')
+                confidence = entry.get('confidence', 1.0)
+                note_id = entry.get('note_id', '')
+                
+                if not date_str or not entity_label:
+                    continue
+                    
+                try:
+                    # Parse the date - should already be in YYYY-MM-DD format
+                    parsed_date = datetime.strptime(str(date_str), '%Y-%m-%d')
+                    parsed_dates.append(parsed_date)
+                    entity_labels.append(str(entity_label))
+                    entity_categories.append(str(entity_category))
+                    confidences.append(confidence)
+                    note_ids.append(note_id)
+                except ValueError:
+                    # Try other common date formats as fallback
+                    date_formats = [
+                        '%Y-%m-%d',           # 2024-06-30
+                        '%d/%m/%Y',           # 30/06/2024  
+                        '%m/%d/%Y',           # 06/30/2024
+                        '%d-%m-%Y',           # 30-06-2024
+                        '%d.%m.%Y',           # 30.06.2024
+                        '%d.%m.%y',           # 30.06.24
+                        '%d/%m/%y',           # 30/06/24
+                        '%d-%m-%y',           # 30-06-24
+                        '%Y.%m.%d',           # 2024.06.30
+                        '%d %b %Y',           # 30 Jun 2024
+                        '%d %B %Y',           # 30 June 2024
+                        '%b %d %Y',           # Jun 30 2024
+                        '%B %d %Y',           # June 30 2024
+                        '%d %b %y',           # 30 Jun 24
+                        '%d %B %y',           # 30 June 24
+                    ]
+                    parsed = False
+                    for fmt in date_formats:
+                        try:
+                            parsed_date = datetime.strptime(str(date_str), fmt)
+                            parsed_dates.append(parsed_date)
+                            entity_labels.append(str(entity_label))
+                            entity_categories.append(str(entity_category))
+                            confidences.append(confidence)
+                            note_ids.append(note_id)
+                            parsed = True
+                            break
+                        except ValueError:
+                            continue
+                    
+                    if not parsed:
+                        # Try cleaning common issues like ordinal suffixes and parentheses
+                        cleaned_date = str(date_str).strip('()').strip()
+                        # Remove ordinal suffixes (1st, 2nd, 3rd, 4th, etc.)
+                        cleaned_date = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', cleaned_date)
+                        
+                        for fmt in date_formats:
+                            try:
+                                parsed_date = datetime.strptime(cleaned_date, fmt)
+                                parsed_dates.append(parsed_date)
+                                entity_labels.append(str(entity_label))
+                                entity_categories.append(str(entity_category))
+                                confidences.append(confidence)
+                                note_ids.append(note_id)
+                                parsed = True
+                                break
+                            except ValueError:
+                                continue
+                    
+                    if not parsed:
+                        # Skip relative dates and other unparseable formats silently
+                        # (like "3 months ago", "next week", etc.)
+                        continue
+                except Exception as e:
+                    print(f"Warning: Could not parse date '{date_str}' for patient {patient_id}: {e}")
+                    continue
+            
+            if not parsed_dates:
+                print(f"Skipping visualization for patient {patient_id}: No valid date entries found")
+                continue
+
+            # Create a DataFrame for plotting
+            timeline_df = pd.DataFrame({
+                'date': parsed_dates,
+                'entity_label': entity_labels,
+                'entity_category': entity_categories,
+                'confidence': confidences,
+                'note_id': note_ids
+            }).sort_values(by='date')  # Sort chronologically
+
+            # Plot the timeline
+            fig, ax = plt.subplots(figsize=(14, max(6, len(timeline_df) * 0.4)))
+            
+            # Create y-offsets for better visibility
+            if len(timeline_df) > 5:
+                num_levels = min(5, len(timeline_df))  # Max 5 levels
+                y_offsets = [(i % num_levels) * 0.15 - (num_levels // 2 * 0.15) for i in range(len(timeline_df))]
+            else:
+                y_offsets = [0.1 * (i - len(timeline_df)//2) for i in range(len(timeline_df))]
+
+            # Color code by confidence (if available)
+            colors = ['red' if c < 0.5 else 'orange' if c < 0.8 else 'green' for c in timeline_df['confidence']]
+            
+            # Plot points
+            scatter = ax.scatter(timeline_df['date'], y_offsets, 
+                               s=120, c=colors, alpha=0.7, zorder=5, edgecolors='black', linewidth=1)
+            
+            # Draw horizontal reference line
+            ax.axhline(0, color='gray', lw=1, linestyle='--', alpha=0.5)
+
+            # Add entity labels with note information
+            for i, (date_obj, entity_str, category_str, confidence, note_id) in enumerate(
+                zip(timeline_df['date'], timeline_df['entity_label'], timeline_df['entity_category'], 
+                    timeline_df['confidence'], timeline_df['note_id'])):
+                
+                vertical_pos = y_offsets[i]
+                
+                # Alternate text position (above/below)
+                text_va = 'bottom' if i % 2 == 0 else 'top'
+                text_y_offset = 0.25 if text_va == 'bottom' else -0.25
+                text_y = vertical_pos + text_y_offset
+                
+                # Create label with entity and note info
+                label_text = f"{entity_str}\n({category_str})"
+                if len(set(timeline_df['note_id'])) > 1:  # Only show note ID if multiple notes
+                    label_text += f"\n(Note {note_id})"
+                
+                ax.annotate(label_text, 
+                           xy=(date_obj, vertical_pos),
+                           xytext=(date_obj, text_y),
+                           ha='center',
+                           va=text_va,
+                           arrowprops=dict(arrowstyle="-", color='gray', alpha=0.6, lw=1),
+                           bbox=dict(boxstyle='round,pad=0.3', fc='lightblue', alpha=0.8, 
+                                   ec='black', lw=0.5),
+                           fontsize=9,
+                           zorder=10)
+            
+            # Format the plot
+            ax.set_yticks([])  # Remove y-axis ticks
+            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            ax.spines['bottom'].set_position(('outward', 10))
+
+            # Format dates on x-axis
+            plt.xticks(rotation=45, ha="right")
+            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d'))
+            
+            # Auto-format dates if many
+            if len(timeline_df['date'].unique()) > 8:
+                fig.autofmt_xdate()
+
+            # Add legend for confidence colors
+            legend_elements = [
+                plt.scatter([], [], c='green', s=100, label='High Confidence (≥0.8)', alpha=0.7, edgecolors='black'),
+                plt.scatter([], [], c='orange', s=100, label='Medium Confidence (0.5-0.8)', alpha=0.7, edgecolors='black'),
+                plt.scatter([], [], c='red', s=100, label='Low Confidence (<0.5)', alpha=0.7, edgecolors='black')
+            ]
+            ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1, 1))
+
+            # Title and labels
+            unique_entities = len(set(timeline_df['entity_label']))
+            unique_categories = len(set(timeline_df['entity_category']))
+            date_range = f"{timeline_df['date'].min().strftime('%Y-%m-%d')} to {timeline_df['date'].max().strftime('%Y-%m-%d')}"
+            
+            plt.title(f'Patient {patient_id} - Medical Timeline\n'
+                     f'{len(timeline_df)} entities, {unique_entities} unique entities, {unique_categories} categories\n'
+                     f'({extractor_name}) | {date_range}', 
+                     fontsize=12, pad=20)
+            plt.xlabel('Date', fontsize=11)
+            plt.ylabel('Medical Timeline', fontsize=11)
+            
+            # Adjust layout
+            plt.tight_layout()
+            
+            # Save the plot
+            safe_extractor_name = re.sub(r'[^\w.-]+', '_', extractor_name).lower()
+            plot_filename = os.path.join(output_dir, f"patient_{patient_id}_{safe_extractor_name}_visual_timeline.png")
+            plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
+        except Exception as e:
+            print(f"Error generating visual timeline for patient {patient_id}: {e}")
+            if 'fig' in locals():
+                plt.close(fig)
+    
+    print(f"Generated {len(patient_timelines)} patient visual timeline plots in {output_dir}")
