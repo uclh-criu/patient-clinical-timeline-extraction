@@ -6,7 +6,6 @@ import json
 import torch
 from tqdm import tqdm
 import pandas as pd
-from utils.relative_date_utils import extract_relative_dates_llm
 
 # Get the appropriate data path based on the config
 def get_data_path(config):
@@ -230,17 +229,8 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
             df = df.iloc[:num_samples]
             print(f"Limiting to {num_samples} samples.")
         
-        # Check if timestamp column exists (for relative date extraction)
+        # Note: Relative date extraction is now handled by extract_relative_dates.py
         relative_date_extraction_enabled = False
-        if hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION') and config.ENABLE_RELATIVE_DATE_EXTRACTION:
-            if timestamp_column and timestamp_column in df.columns:
-                relative_date_extraction_enabled = True
-                print(f"Relative date extraction enabled using timestamp column: {timestamp_column}")
-                
-                # Add new column for storing LLM extracted dates
-                df['llm_extracted_dates'] = None
-            else:
-                print(f"Warning: Relative date extraction enabled in config but timestamp column '{timestamp_column}' not found in CSV")
             
     except Exception as e:
         print(f"Error loading CSV: {e}")
@@ -457,6 +447,23 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                                 start_pos = date_obj.get('start', 0)
                                 dates_list.append((parsed_date, original_date, start_pos))
                             
+                            # Check for LLM-extracted dates (from extract_relative_dates.py)
+                            if 'llm_extracted_dates' in df.columns:
+                                llm_dates_data = row.get('llm_extracted_dates')
+                                if pd.notna(llm_dates_data) and llm_dates_data:
+                                    try:
+                                        # Parse the LLM-extracted dates
+                                        llm_dates = safe_json_loads(llm_dates_data)
+                                        for date_obj in llm_dates:
+                                            parsed_date = date_obj.get('parsed', '')
+                                            original_date = date_obj.get('original', '')
+                                            start_pos = date_obj.get('start', 0)
+                                            dates_list.append((parsed_date, original_date, start_pos))
+                                            
+                                        print(f"Added {len(llm_dates)} LLM-extracted dates for row {i}")
+                                    except Exception as e:
+                                        print(f"Error parsing LLM-extracted dates for row {i}: {e}")
+                            
                             # If we found entities, use them
                             if diagnoses_list or dates_list:
                                 entities = (diagnoses_list, dates_list)
@@ -541,6 +548,23 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                         except Exception as e:
                             print(f"Error parsing dates for row {i}: {e}")
                 
+                # Check for LLM-extracted dates (from extract_relative_dates.py)
+                if 'llm_extracted_dates' in df.columns:
+                    llm_dates_data = row.get('llm_extracted_dates')
+                    if pd.notna(llm_dates_data) and llm_dates_data:
+                        try:
+                            # Parse the LLM-extracted dates
+                            llm_dates = safe_json_loads(llm_dates_data)
+                            for date_obj in llm_dates:
+                                parsed_date = date_obj.get('parsed', '')
+                                original_date = date_obj.get('original', '')
+                                start_pos = date_obj.get('start', 0)
+                                dates_list.append((parsed_date, original_date, start_pos))
+                                
+                            print(f"Added {len(llm_dates)} LLM-extracted dates for row {i}")
+                        except Exception as e:
+                            print(f"Error parsing LLM-extracted dates for row {i}: {e}")
+                
                 # Update entities tuple with the combined data
                 entities = (entities_list_for_rel_extraction, dates_list)
                 
@@ -550,67 +574,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
                 total_entities += len(entities_list_for_rel_extraction)
                 total_dates += len(dates_list)
             
-            # Process relative dates if enabled (same for both modes)
-            if relative_date_extraction_enabled:
-                # Get the document timestamp
-                timestamp_str = row.get(timestamp_column)
-                
-                if pd.notna(timestamp_str) and timestamp_str:
-                    try:
-                        # Parse the timestamp string into a datetime object
-                        # Try different formats
-                        document_timestamp = None
-                        timestamp_formats = [
-                            '%Y-%m-%d',              # 2023-10-26
-                            '%Y-%m-%d %H:%M:%S',     # 2023-10-26 15:30:45
-                            '%m/%d/%Y',              # 10/26/2023
-                            '%m/%d/%Y %H:%M:%S',     # 10/26/2023 15:30:45
-                            '%d-%b-%Y',              # 26-Oct-2023
-                            '%d %b %Y',              # 26 Oct 2023
-                            '%d/%m/%Y',              # 14/05/2025
-                        ]
-                        
-                        for format_str in timestamp_formats:
-                            try:
-                                document_timestamp = datetime.strptime(timestamp_str, format_str)
-                                break
-                            except ValueError:
-                                continue
-                        
-                        if document_timestamp:
-                            # Only print for a few rows to reduce output
-                            if i % 20 == 0 or i < 3:
-                                print(f"Extracting relative dates for row {i} using timestamp: {document_timestamp.strftime('%Y-%m-%d')}")
-                            
-                            # Extract relative dates using LLM
-                            relative_dates = extract_relative_dates_llm(text, document_timestamp, config)
-                            
-                            if relative_dates:
-                                # Append relative dates to existing dates list
-                                entities_list_for_rel_extraction, dates_list = entities
-                                combined_dates_list = dates_list + relative_dates
-                                
-                                # Update entities with combined dates
-                                entities = (entities_list_for_rel_extraction, combined_dates_list)
-                                
-                                # Convert relative dates to JSON for storage in CSV
-                                relative_dates_json = []
-                                for date_tuple in relative_dates:
-                                    parsed_date, original_phrase, start_pos = date_tuple
-                                    relative_dates_json.append({
-                                        "parsed": parsed_date,
-                                        "original": original_phrase,
-                                        "start": start_pos
-                                    })
-                                
-                                # Store in the dataframe
-                                df.at[i, 'llm_extracted_dates'] = json.dumps(relative_dates_json)
-                                
-                                if i % 20 == 0 or i < 3:  # Reduce output, just show some samples
-                                    print(f"Row {i} extracted {len(relative_dates)} relative dates")
-                    except Exception as e:
-                        print(f"Error extracting relative dates for row {i}: {e}")
-            
+            # Note: Relative date extraction is now handled by extract_relative_dates.py
             # Add the prepared data entry - MOVED OUTSIDE THE IF/ELSE BLOCK
             prepared_test_data.append({
                 'note_id': i,
@@ -632,20 +596,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     print(f"Average dates per note: {total_dates/max(1, len(prepared_test_data)):.2f}")
     print("===== END ENTITY EXTRACTION SUMMARY =====\n")
     
-    # Save the updated dataframe back to CSV if we extracted relative dates
-    if relative_date_extraction_enabled and 'llm_extracted_dates' in df.columns:
-        try:
-            # Create a backup of the original CSV
-            backup_path = dataset_path + '.backup'
-            if not os.path.exists(backup_path):
-                df.to_csv(backup_path, index=False)
-                print(f"Created backup of original CSV at {backup_path}")
-            
-            # Save the updated dataframe with LLM-extracted dates
-            df.to_csv(dataset_path, index=False)
-            print(f"Saved updated CSV with LLM-extracted dates to {dataset_path}")
-        except Exception as e:
-            print(f"Error saving updated CSV: {e}")
+    # Note: Relative date extraction is now handled by extract_relative_dates.py
     
     # Return appropriate values based on mode
     if disorder_only_mode:
