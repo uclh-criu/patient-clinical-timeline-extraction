@@ -1,10 +1,10 @@
 import os
 import torch
 from extractors.base_extractor import BaseRelationExtractor
-from model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
-from model_training.Vocabulary import Vocabulary
-from model_training.training_config import EMBEDDING_DIM, HIDDEN_DIM
-from utils.extraction_utils import preprocess_note_for_prediction, create_prediction_dataset, predict_relationships
+from custom_model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
+from custom_model_training.Vocabulary import Vocabulary
+from custom_model_training.training_config_custom import EMBEDDING_DIM, HIDDEN_DIM
+from utils.inference_utils import preprocess_note_for_prediction, create_prediction_dataset, predict_relationships
 
 class CustomExtractor(BaseRelationExtractor):
     """

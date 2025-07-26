@@ -12,22 +12,27 @@ from extractors.extractor_factory import create_extractor
 import config
 
 # Import from unified extraction_utils module
-from utils.extraction_utils import (
-    calculate_and_report_metrics,
+from utils.inference_utils import (
     load_and_prepare_data,
     run_extraction,
-    get_data_path,
-    transform_python_to_json,
-    extract_relative_dates_llm,
+    get_data_path
+)
+
+from utils.evaluation_utils import (
+    calculate_and_report_metrics,
+    calculate_entity_metrics
+)
+
+from utils.post_processing_utils import (
     aggregate_predictions_by_patient,
     generate_patient_timelines,
-    generate_patient_timeline_summary,
-    calculate_entity_metrics
+    generate_patient_timeline_summary
 )
 
 # Define the output directory using absolute path if project_root is available
 if 'project_root' not in locals() and 'project_root' not in globals():
     project_root = os.path.dirname(os.path.abspath(__file__))
+
 EXPERIMENT_OUTPUT_DIR = os.path.join(project_root, "experiment_outputs")
 
 def generate_patient_timeline_visualizations(patient_timelines, output_dir, extractor_name):
@@ -448,8 +453,7 @@ def evaluate_on_dataset():
         print(f"Successfully saved predictions to column '{predictions_column}'")
         if relationship_gold:
             print(f"Successfully saved correctness indicators to column '{correctness_column}'")
-
-            
+ 
     except Exception as e:
         print(f"Error saving predictions to CSV: {e}")
         import traceback

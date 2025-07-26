@@ -1,19 +1,42 @@
-# utils/common_utils.py
 import re
 import os
-import ast  # For safely evaluating Python literals
+import ast
 from datetime import datetime
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.metrics import ConfusionMatrixDisplay
 import json
 import torch
-# Add tqdm for progress bars
 from tqdm import tqdm
-# Add pandas for CSV processing
 import pandas as pd
-# Add dotenv for OpenAI API keys
-from dotenv import load_dotenv
+from utils.relative_date_utils import extract_relative_dates_llm
+
+# Get the appropriate data path based on the config
+def get_data_path(config):
+    """
+    Get the correct dataset path based on the config.DATA_SOURCE setting.
+    
+    Args:
+        config: Configuration object with DATA_SOURCE and path attributes.
+        
+    Returns:
+        str: Path to the dataset file.
+    """
+    data_source = config.DATA_SOURCE.lower()
+    
+    if data_source == 'synthetic':
+        return config.SYNTHETIC_DATA_PATH
+    elif data_source == 'synthetic_updated':
+        return config.SYNTHETIC_UPDATED_DATA_PATH
+    elif data_source == 'sample':
+        return config.SAMPLE_DATA_PATH
+    elif data_source == 'imaging':
+        return config.IMAGING_DATA_PATH
+    elif data_source == 'notes':
+        return config.NOTES_DATA_PATH
+    elif data_source == 'letters':
+        return config.LETTERS_DATA_PATH
+    elif data_source == 'nph':
+        return config.NPH_DATA_PATH
+    else:
+        raise ValueError(f"Unknown data source: {data_source}. Valid options are: 'synthetic', 'synthetic_updated', 'sample', 'imaging', 'notes', 'letters', 'nph'")
 
 def safe_json_loads(data_string):
     """
@@ -47,6 +70,41 @@ def safe_json_loads(data_string):
             # If all else fails, raise the original error to be caught by the caller.
             raise json.JSONDecodeError(f"Failed to parse with all methods: {e2}", data_string, 0) from e
 
+def transform_python_to_json(python_string):
+    """
+    Transform a Python-style string with single quotes and datetime objects 
+    into a valid JSON string with double quotes.
+    
+    Args:
+        python_string: A string representing Python objects (like a list of dicts with single quotes)
+        
+    Returns:
+        A valid JSON string with all strings double-quoted
+    """
+    if not python_string or pd.isna(python_string):
+        return "[]"  # Return empty JSON array if input is empty or NaN
+        
+    # Handle datetime.date objects by converting them to ISO format strings
+    # Example: datetime.date(2019, 4, 18) -> "2019-04-18"
+    date_pattern = r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)"
+    def date_replacer(match):
+        year, month, day = map(int, match.groups())
+        return f'"{year:04d}-{month:02d}-{day:02d}"'
+    
+    # Apply the datetime replacement
+    python_string_cleaned = re.sub(date_pattern, date_replacer, python_string)
+    
+    try:
+        # Use ast.literal_eval to safely parse the Python literal
+        python_obj = ast.literal_eval(python_string_cleaned)
+        
+        # Convert to valid JSON string with double quotes
+        return json.dumps(python_obj)
+    except (SyntaxError, ValueError) as e:
+        # If ast.literal_eval fails, return an empty JSON array
+        print(f"Warning: Failed to parse Python-style string: {e}")
+        return "[]"
+
 # Clean and preprocess text for model input
 def preprocess_text(text):
     # Convert to lowercase
@@ -56,36 +114,6 @@ def preprocess_text(text):
     # Replace multiple spaces with single space
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
-
-# Get the appropriate data path based on the config
-def get_data_path(config):
-    """
-    Get the correct dataset path based on the config.DATA_SOURCE setting.
-    
-    Args:
-        config: Configuration object with DATA_SOURCE and path attributes.
-        
-    Returns:
-        str: Path to the dataset file.
-    """
-    data_source = config.DATA_SOURCE.lower()
-    
-    if data_source == 'synthetic':
-        return config.SYNTHETIC_DATA_PATH
-    elif data_source == 'synthetic_updated':
-        return config.SYNTHETIC_UPDATED_DATA_PATH
-    elif data_source == 'sample':
-        return config.SAMPLE_DATA_PATH
-    elif data_source == 'imaging':
-        return config.IMAGING_DATA_PATH
-    elif data_source == 'notes':
-        return config.NOTES_DATA_PATH
-    elif data_source == 'letters':
-        return config.LETTERS_DATA_PATH
-    elif data_source == 'nph':
-        return config.NPH_DATA_PATH
-    else:
-        raise ValueError(f"Unknown data source: {data_source}. Valid options are: 'synthetic', 'synthetic_updated', 'sample', 'imaging', 'notes', 'letters', 'nph'")
 
 def _parse_entity_column(data_string):
     """Helper to parse a JSON-like string from an entity column."""
@@ -358,24 +386,6 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     elif not disorder_only_mode:
         print("No entity gold standard column found or specified.")
     
-    # --- Process PA Likelihood Gold Standard (only in multi_entity mode) ---
-    if not disorder_only_mode and pa_likelihood_gold_col and pa_likelihood_gold_col in df.columns:
-        print("Found PA likelihood gold standard column. Processing likelihood data...")
-        
-        for i, row in df.iterrows():
-            patient_id = row.get(patient_id_column)
-            likelihood = row.get(pa_likelihood_gold_col)
-            
-            if pd.notna(likelihood) and patient_id is not None:
-                try:
-                    pa_likelihood_gold[patient_id] = float(likelihood)
-                except (ValueError, TypeError) as e:
-                    print(f"Warning: Could not convert PA likelihood value '{likelihood}' to float for patient {patient_id}: {e}")
-        
-        print(f"Prepared PA likelihood gold standard for {len(pa_likelihood_gold)} patients.")
-    elif not disorder_only_mode:
-        print("No PA likelihood gold standard column found or specified.")
-    
     # Pre-extract entities from the text column
     print("Pre-extracting entities...")
     prepared_test_data = []
@@ -643,7 +653,6 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     else:
         return prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold
 
-# Inference-related functions moved from training_utils.py
 def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
     """Preprocess features from a clinical note for prediction using pre-extracted entities.
     
@@ -964,934 +973,3 @@ def run_extraction(extractor, prepared_test_data):
 
     print(f"Generated {len(all_predictions)} predictions. Skipped {skipped_rels} potentially invalid relationships.")
     return all_predictions
-
-def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name, output_dir, total_notes_processed, dataset_path=None):
-    """
-    Compares predictions with gold standard, calculates metrics, prints results,
-    and saves a confusion matrix plot.
-
-    Args:
-        all_predictions (list): List of predicted relationships (normalized by the caller).
-                                Each dict must contain 'note_id', 'diagnosis'/'entity_label', 'date' (YYYY-MM-DD).
-        gold_standard (list): List of gold standard relationships (normalized).
-                              Each dict must contain 'note_id', 'diagnosis'/'entity_label', 'date' (YYYY-MM-DD).
-        extractor_name (str): Name of the extractor being evaluated.
-        output_dir (str): Directory to save evaluation outputs.
-        total_notes_processed (int): The total number of notes processed by the extractor.
-        dataset_path (str, optional): Path to the dataset for display in the plot title.
-
-    Returns:
-        dict: A dictionary containing calculated metrics.
-    """
-    # Determine if we're in disorder_only mode by checking the keys in gold_standard
-    # If any item has 'diagnosis' key, we're in disorder_only mode
-    disorder_only_mode = False
-    entity_key = 'entity_label'  # Default to multi_entity mode
-    
-    if gold_standard and len(gold_standard) > 0:
-        if 'diagnosis' in gold_standard[0]:
-            disorder_only_mode = True
-            entity_key = 'diagnosis'
-    
-    # Also check the predictions to determine mode
-    if all_predictions and len(all_predictions) > 0:
-        if 'diagnosis' in all_predictions[0]:
-            disorder_only_mode = True
-            entity_key = 'diagnosis'
-    
-    print(f"Using {'disorder_only' if disorder_only_mode else 'multi_entity'} mode with entity key: {entity_key}")
-    
-    if not gold_standard:
-        print(f"  No gold standard data provided for {extractor_name} (processed {total_notes_processed} notes). Skipping metric calculation.")
-        # Return zeroed metrics if no gold standard
-        return {
-            'precision': 0, 'recall': 0, 'f1': 0, 'accuracy': 0,
-            'true_positives': 0, 'false_positives': 0, 'false_negatives': 0
-        }
-
-    # Identify the notes that have gold standard labels
-    gold_note_ids = set(g['note_id'] for g in gold_standard)
-    num_labeled_notes = len(gold_note_ids)
-
-    if num_labeled_notes == 0:
-        print(f"  No notes with gold standard labels found for {extractor_name} (processed {total_notes_processed} notes). Skipping metric calculation.")
-        return {
-            'precision': 0, 'recall': 0, 'f1': 0, 'accuracy': 0,
-            'true_positives': 0, 'false_positives': 0, 'false_negatives': 0
-        }
-    
-    print(f"  Evaluating metrics for {extractor_name} based on {num_labeled_notes} notes with gold standard labels (out of {total_notes_processed} notes processed).")
-
-    # Filter predictions to include only those from labeled notes
-    filtered_predictions = [p for p in all_predictions if p['note_id'] in gold_note_ids]
-    
-    # --- DEBUG: Print predictions and gold standards for comparison ---
-    print("\n--- Comparing Predictions to Gold Standard ---")
-    
-    # Load the dataset to get the note text if dataset_path is provided
-    note_texts = {}
-    if dataset_path:
-        try:
-            import pandas as pd
-            df = pd.read_csv(dataset_path)
-            if 'note' in df.columns and 'note_id' in df.columns:
-                for _, row in df.iterrows():
-                    note_id = row['note_id']
-                    if note_id in gold_note_ids:
-                        note_texts[note_id] = row['note']
-        except Exception as e:
-            print(f"Warning: Could not load note texts from dataset: {e}")
-    
-    # Print comparison for all notes with gold standard labels
-    for note_id in sorted(gold_note_ids):
-        # Using a simple list comprehension for clarity
-        note_preds = [p for p in filtered_predictions if p.get('note_id') == note_id]
-        note_golds = [g for g in gold_standard if g.get('note_id') == note_id]
-        
-        print(f"\n[Note ID: {note_id}]")
-        
-        # Print the full note text if available
-        if note_id in note_texts:
-            print("\nFULL NOTE TEXT:")
-            print("-" * 80)
-            print(note_texts[note_id])
-            print("-" * 80)
-        
-        # To make it easier to read, convert dicts to strings and join them
-        # Always use entity_label since our refactoring standardized on that field
-        gold_str = '\n    - '.join([f"{g.get('entity_label', 'unknown')} @ {g.get('date', 'unknown')}" for g in note_golds])
-        
-        # For predictions, still respect the mode since extractors might return different fields
-        if disorder_only_mode:
-            pred_str = '\n    - '.join([f"{p.get('diagnosis', p.get('entity_label', 'unknown'))} @ {p.get('date', 'unknown')}" for p in note_preds])
-        else:
-            pred_str = '\n    - '.join([f"{p.get('entity_label', p.get('diagnosis', 'unknown'))} @ {p.get('date', 'unknown')}" for p in note_preds])
-        
-        print(f"  Gold Standard : \n    - {gold_str if gold_str else '[]'}")
-        print(f"  Predictions   : \n    - {pred_str if pred_str else '[]'}")
-    print("--------------------------------------------\n")
-    
-    if not filtered_predictions:
-        print(f"  No predictions found for the {num_labeled_notes} labeled notes by {extractor_name}.")
-        # If no predictions for labeled notes, TP and FP are 0. FN is total gold.
-        true_positives = 0
-        false_positives = 0
-        false_negatives = len(gold_standard) # All gold items were missed
-        pred_set = set()  # Empty set for reporting
-        
-        # Create gold_set based on the mode
-        gold_set = set()
-        for g in gold_standard:
-            # Always use entity_label for gold standard since our refactoring standardized on that field
-            gold_set.add((g['note_id'], g.get('entity_label', ''), g.get('date', '')))
-    else:
-        # Convert filtered predictions and gold standard to sets for comparison
-        # Handle both disorder_only and multi_entity modes
-        pred_set = set()
-        for p in filtered_predictions:
-            if disorder_only_mode:
-                # In disorder_only mode, use 'diagnosis' field
-                if 'diagnosis' in p:
-                    pred_set.add((p['note_id'], p['diagnosis'], p['date']))
-                else:
-                    # If 'diagnosis' is missing but 'entity_label' exists, use that instead
-                    if 'entity_label' in p:
-                        pred_set.add((p['note_id'], p['entity_label'], p['date']))
-                    else:
-                        print(f"Warning: Prediction missing both 'diagnosis' and 'entity_label' fields: {p}")
-            else:
-                # In multi_entity mode, use 'entity_label' field
-                if 'entity_label' in p:
-                    if 'entity_category' in p:
-                        pred_set.add((p['note_id'], p['entity_label'], p['entity_category'], p['date']))
-                    else:
-                        pred_set.add((p['note_id'], p['entity_label'], p['date']))
-                else:
-                    # If 'entity_label' is missing but 'diagnosis' exists, use that instead
-                    if 'diagnosis' in p:
-                        pred_set.add((p['note_id'], p['diagnosis'], 'disorder', p['date']))
-                    else:
-                        print(f"Warning: Prediction missing both 'entity_label' and 'diagnosis' fields: {p}")
-        
-        # Similarly for gold standard
-        gold_set = set()
-        for g in gold_standard:
-            # Always use entity_label for gold standard since our refactoring standardized on that field
-            if 'entity_label' in g:
-                if 'entity_category' in g and not disorder_only_mode:
-                    gold_set.add((g['note_id'], g['entity_label'], g['entity_category'], g['date']))
-                else:
-                    gold_set.add((g['note_id'], g['entity_label'], g['date']))
-            else:
-                # Fall back to diagnosis if entity_label is not available (should not happen after refactoring)
-                if 'diagnosis' in g:
-                    if not disorder_only_mode:
-                        gold_set.add((g['note_id'], g['diagnosis'], 'disorder', g['date']))
-                    else:
-                        gold_set.add((g['note_id'], g['diagnosis'], g['date']))
-                else:
-                    print(f"Warning: Gold standard missing both 'entity_label' and 'diagnosis' fields: {g}")
-
-        # Calculate TP, FP, FN based on filtered predictions
-        true_positives = len(pred_set & gold_set)
-        false_positives = len(pred_set - gold_set)
-        false_negatives = len(gold_set - pred_set)
-    
-    true_negatives = 0 # TN is ill-defined/hard to calculate accurately here
-
-    # Calculate metrics
-    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
-    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-    
-    # Calculate accuracy: (TP + TN) / (TP + TN + FP + FN)
-    # Note: TN is set to 0 since it's ill-defined for this task, so accuracy = TP / (TP + FP + FN)
-    accuracy = true_positives / (true_positives + false_positives + false_negatives) if (true_positives + false_positives + false_negatives) > 0 else 0
-
-    # --- Reporting ---
-    print(f"  Evaluation Results for {extractor_name} (on labeled subset):")
-    print(f"    Total unique predictions for labeled notes: {len(pred_set)}")    # TP + FP for labeled notes
-    print(f"    Total unique gold relationships:           {len(gold_set)}")   # TP + FN for labeled notes
-    print(f"    True Positives:  {true_positives}")
-    print(f"    False Positives: {false_positives}")
-    print(f"    False Negatives: {false_negatives}")
-    print(f"    Precision: {precision:.3f}")
-    print(f"    Recall:    {recall:.3f}")
-    print(f"    F1 Score:  {f1:.3f}")
-    print(f"    Accuracy:  {accuracy:.3f}")
-
-    # --- Plotting ---
-    # Plotting confusion matrix based on these filtered values
-    conf_matrix_values = [true_negatives, false_positives, false_negatives, true_positives]
-    plt.figure(figsize=(8, 6))
-    tn, fp, fn, tp = conf_matrix_values
-    conf_matrix_display_array = np.array([[tn, fp], [fn, tp]])
-    
-    # Create clearer labels
-    display_labels = ['No Relation', 'Has Relation']
-    
-    # Create the confusion matrix display without automatic text
-    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix_display_array, display_labels=display_labels)
-    ax = disp.plot(cmap=plt.cm.Blues, values_format='', text_kw={'alpha': 0})  # Hide automatic text
-    
-    # Add custom annotations to make TP/TN/FP/FN clear
-    ax = plt.gca()
-    
-    # Add our own text annotations for each quadrant
-    ax.text(0, 0, f'TN\n{tn}', ha='center', va='center', fontsize=11, color='white' if tn > 20 else 'black')
-    ax.text(1, 0, f'FP\n{fp}', ha='center', va='center', fontsize=11, color='white' if fp > 20 else 'black')
-    ax.text(0, 1, f'FN\n{fn}', ha='center', va='center', fontsize=11, color='white' if fn > 20 else 'black')
-    ax.text(1, 1, f'TP\n{tp}', ha='center', va='center', fontsize=11, color='white' if tp > 20 else 'black')
-    
-    # Set axis labels
-    ax.set_ylabel('Actual', fontsize=12)
-    ax.set_xlabel('Predicted', fontsize=12)
-    
-    # Get dataset name from path for display
-    dataset_name = "Unknown"
-    if dataset_path:
-        dataset_name = os.path.basename(dataset_path)
-    
-    # Title with metrics and dataset info
-    plt.title(f"Confusion Matrix - {extractor_name}\nPrec: {precision:.3f} | Rec: {recall:.3f} | F1: {f1:.3f} | Acc: {accuracy:.3f}\nDataset: {dataset_name}", 
-             fontsize=12, pad=20)
-    
-    # Adjust layout
-    plt.tight_layout()
-
-    os.makedirs(output_dir, exist_ok=True)
-    safe_extractor_name = re.sub(r'[^\w.-]+', '_', extractor_name).lower()
-    plot_filename = f"{safe_extractor_name}_confusion_matrix_labeled_subset.png"
-    plot_save_path = os.path.join(output_dir, plot_filename)
-    try:
-        plt.savefig(plot_save_path)
-        print(f"    Confusion matrix (labeled subset) saved to {plot_save_path}")
-    except Exception as e:
-        print(f"    Error saving confusion matrix: {e}")
-    plt.close()
-
-    # Return calculated metrics
-    metrics_dict = {
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
-        'accuracy': accuracy,
-        'true_positives': true_positives,
-        'false_positives': false_positives,
-        'false_negatives': false_negatives,
-    }
-    return metrics_dict
-
-def transform_python_to_json(python_string):
-    """
-    Transform a Python-style string with single quotes and datetime objects 
-    into a valid JSON string with double quotes.
-    
-    Args:
-        python_string: A string representing Python objects (like a list of dicts with single quotes)
-        
-    Returns:
-        A valid JSON string with all strings double-quoted
-    """
-    if not python_string or pd.isna(python_string):
-        return "[]"  # Return empty JSON array if input is empty or NaN
-        
-    # Handle datetime.date objects by converting them to ISO format strings
-    # Example: datetime.date(2019, 4, 18) -> "2019-04-18"
-    date_pattern = r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)"
-    def date_replacer(match):
-        year, month, day = map(int, match.groups())
-        return f'"{year:04d}-{month:02d}-{day:02d}"'
-    
-    # Apply the datetime replacement
-    python_string_cleaned = re.sub(date_pattern, date_replacer, python_string)
-    
-    try:
-        # Use ast.literal_eval to safely parse the Python literal
-        python_obj = ast.literal_eval(python_string_cleaned)
-        
-        # Convert to valid JSON string with double quotes
-        return json.dumps(python_obj)
-    except (SyntaxError, ValueError) as e:
-        # If ast.literal_eval fails, return an empty JSON array
-        print(f"Warning: Failed to parse Python-style string: {e}")
-        return "[]"
-
-def extract_relative_dates_llm(text, document_timestamp, config):
-    """
-    Extract relative date references from text using an LLM.
-    Returns a list of tuples: (parsed_date_str, raw_phrase_str, start_position)
-    compatible with the existing dates format.
-    
-    Args:
-        text (str): The clinical note text
-        document_timestamp (datetime): The timestamp of the document for reference
-        config: Configuration object with LLM settings
-        
-    Returns:
-        list: A list of date tuples (parsed_date_str, raw_phrase_str, start_position)
-    """
-    # Check if relative date extraction is enabled
-    if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION') or not config.ENABLE_RELATIVE_DATE_EXTRACTION:
-        return []
-        
-    # Check inputs
-    if not text or pd.isna(text) or not document_timestamp:
-        return []
-    
-    # Truncate text if longer than the configured context window
-    max_context = getattr(config, 'RELATIVE_DATE_CONTEXT_WINDOW', 1000)
-    if len(text) > max_context:
-        text = text[:max_context]
-    
-    # Determine which LLM to use
-    llm_model = getattr(config, 'RELATIVE_DATE_LLM_MODEL', 'llama')
-    
-    if llm_model.lower() == 'openai':
-        return extract_relative_dates_openai(text, document_timestamp, config)
-    elif llm_model.lower() == 'llama':
-        return extract_relative_dates_llama(text, document_timestamp, config)
-    else:
-        print(f"Warning: Unknown RELATIVE_DATE_LLM_MODEL: {llm_model}")
-        return []
-
-def extract_relative_dates_openai(text, document_timestamp, config):
-    """
-    Extract relative dates using OpenAI API.
-    
-    Args:
-        text (str): The clinical note text
-        document_timestamp (datetime): The timestamp of the document for reference
-        config: Configuration object with OpenAI settings
-        
-    Returns:
-        list: A list of date tuples (parsed_date_str, raw_phrase_str, start_position)
-    """
-    try:
-        # Load environment variables for API key
-        load_dotenv()
-        api_key = os.getenv('OPENAI_API_KEY')
-        
-        # Reduce verbosity
-        debug_mode = getattr(config, 'DEBUG_MODE', False)
-        if debug_mode:
-            print("Attempting to use OpenAI API for relative date extraction...")
-        
-        if not api_key:
-            print("Error: OPENAI_API_KEY not found in .env file or environment variables.")
-            return []
-        
-        if api_key == "your_actual_api_key_here" or api_key == "your_api_key_here":
-            print("Error: You need to replace the placeholder in .env with your actual OpenAI API key.")
-            return []
-            
-        if debug_mode:
-            print(f"API key found (starts with: {api_key[:4]}{'*' * 20})")
-        
-        # Import OpenAI
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
-            if debug_mode:
-                print("OpenAI client initialized successfully")
-        except ImportError:
-            print("Error: openai package not installed. Install with 'pip install openai'.")
-            return []
-        
-        # Get model name from config or use default
-        model_name = getattr(config, 'RELATIVE_DATE_OPENAI_MODEL', 'gpt-3.5-turbo')
-        if debug_mode:
-            print(f"Using OpenAI model: {model_name}")
-        
-        # Format the timestamp for the prompt
-        timestamp_str = document_timestamp.strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Construct the prompt
-        prompt = f"""
-You are a medical AI assistant specialized in extracting temporal expressions from clinical notes.
-
-TASK: Find ALL relative date expressions in the clinical note below and convert them to absolute dates.
-
-DOCUMENT CREATION DATE: {timestamp_str}
-
-CLINICAL NOTE TEXT:
-"{text}"
-
-WHAT TO FIND (Relative Date Expressions):
-- Time ago: "6 months ago", "3 years ago", "last week", "yesterday", "three days prior"
-- Duration references: "3-month history", "over the past 2 weeks", "for the past year", "2-week history"
-- Contextual time: "last Tuesday", "next month", "this past year", "earlier this week"  
-- Prior/before references: "5 years prior", "diagnosed 2 years before", "2 weeks prior to presentation"
-- Future references: "in 6 months", "follow up in 3 weeks", "scheduled next month", "in 1 week"
-- Vague temporal: "recently", "last visit", "previous consultation", "last month"
-
-WHAT NOT TO FIND (Absolute Dates - IGNORE THESE):
-- Specific dates: "2023-08-15", "15/11/2023", "October 3, 2023", "22 Aug 2023"
-- Birth dates: "DOB: 1975-03-15"
-- Any date in YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, or "Month DD, YYYY" format
-
-INSTRUCTIONS:
-1. Search the ENTIRE text for phrases that express time RELATIVE to the document date
-2. IGNORE any absolute/specific dates - only find expressions that are relative to "now"
-3. For each relative phrase found, note its EXACT start position in the original text
-4. Calculate the absolute date based on the document creation date
-5. Be thorough - include duration patterns like "3-month history", "over the past X", "in X weeks/months"
-
-RETURN FORMAT: JSON array with objects containing:
-- "phrase": exact text of the relative date expression
-- "start_index": character position where phrase starts in the text
-- "calculated_date": absolute date in YYYY-MM-DD format
-
-COMPREHENSIVE EXAMPLES:
-Text: "Patient has 3-month history of symptoms. Surgery was 2 years ago. Follow-up in 6 months. Over the past 2 weeks, symptoms worsened. Last visit was on 2023-06-01."
-Document date: 2023-06-09
-Result:
-[
-  {{"phrase": "3-month history", "start_index": 12, "calculated_date": "2023-03-09"}},
-  {{"phrase": "2 years ago", "start_index": 48, "calculated_date": "2021-06-09"}},
-  {{"phrase": "in 6 months", "start_index": 75, "calculated_date": "2023-12-09"}},
-  {{"phrase": "Over the past 2 weeks", "start_index": 90, "calculated_date": "2023-05-26"}},
-  {{"phrase": "Last visit", "start_index": 124, "calculated_date": "2023-06-01"}}
-]
-Note: "2023-06-01" would NOT be included as it's an absolute date.
-
-If NO relative dates found, return: []
-
-JSON RESULT:"""
-        
-        if debug_mode:
-            print("Sending request to OpenAI API...")
-        
-        # Call the OpenAI API
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": "You are a medical AI assistant specialized in extracting temporal expressions from clinical notes."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0,
-                max_tokens=1000
-            )
-            if debug_mode:
-                print("Received response from OpenAI API")
-        except Exception as api_error:
-            print(f"OpenAI API error: {api_error}")
-            return []
-        
-        # Extract the response text
-        response_text = response.choices[0].message.content.strip()
-        if debug_mode:
-            print(f"Response text length: {len(response_text)} characters")
-            print(f"Full OpenAI response text:")
-            print("=" * 50)
-            print(response_text)
-            print("=" * 50)
-        
-        # Find the JSON array in the response
-        start_idx = response_text.find('[')
-        end_idx = response_text.rfind(']') + 1
-        
-        if start_idx >= 0 and end_idx > start_idx:
-            json_str = response_text[start_idx:end_idx]
-            if debug_mode:
-                print(f"Found JSON array: {json_str[:100]}...")
-            
-            try:
-                dates_data = safe_json_loads(json_str)
-                if dates_data and debug_mode:
-                    print(f"Successfully parsed JSON with {len(dates_data)} results")
-                
-                # Convert to the expected tuple format
-                relative_dates = []
-                for item in dates_data:
-                    phrase = item.get('phrase', '')
-                    start_index = item.get('start_index', 0)
-                    calculated_date = item.get('calculated_date', '')
-                    
-                    # Only add valid entries
-                    if phrase and calculated_date:
-                        # Filter out phrases that look like absolute dates
-                        import re
-                        absolute_date_patterns = [
-                            r'\b\d{4}-\d{1,2}-\d{1,2}\b',          # YYYY-MM-DD
-                            r'\b\d{1,2}/\d{1,2}/\d{4}\b',          # DD/MM/YYYY or MM/DD/YYYY
-                            r'\b\w+ \d{1,2}, \d{4}\b',             # Month DD, YYYY
-                            r'\b\d{1,2} \w+ \d{4}\b',              # DD Month YYYY
-                        ]
-                        
-                        is_absolute_date = any(re.search(pattern, phrase) for pattern in absolute_date_patterns)
-                        
-                        if not is_absolute_date:
-                            relative_dates.append((calculated_date, phrase, start_index))
-                
-                return relative_dates
-            except json.JSONDecodeError as e:
-                print(f"Error parsing OpenAI JSON response: {e}")
-                return []
-        else:
-            if debug_mode:
-                print("No JSON array found in OpenAI response")
-                if len(response_text) < 200:
-                    print(f"Full response was: {response_text}")
-            return []
-            
-    except Exception as e:
-        print(f"Error in OpenAI relative date extraction: {e}")
-        if getattr(config, 'DEBUG_MODE', False):
-            import traceback
-            traceback.print_exc()
-        return []
-
-def extract_relative_dates_llama(text, document_timestamp, config):
-    """
-    Extract relative dates using Llama model.
-    
-    Args:
-        text (str): The clinical note text
-        document_timestamp (datetime): The timestamp of the document for reference
-        config: Configuration object with Llama settings
-        
-    Returns:
-        list: A list of date tuples (parsed_date_str, raw_phrase_str, start_position)
-    """
-    try:
-        # Check if transformers package is installed
-        try:
-            from transformers import pipeline
-            import torch
-        except ImportError:
-            print("Error: transformers package not installed. Install with 'pip install transformers'.")
-            return []
-        
-        # Get model path from config
-        model_path = getattr(config, 'LLAMA_MODEL_PATH', './Llama-3.2-3B-Instruct')
-        
-        # Initialize the pipeline
-        try:
-            # Create a loading indicator since model loading can take time
-            with tqdm(total=100, desc="Loading Llama model", unit="%") as pbar:
-                print(f"Loading Llama model for relative date extraction from {model_path}...")
-                
-                # Update progress to 25% - started loading
-                pbar.update(25)
-                
-                # Load the model
-                pipe = pipeline(
-                    "text-generation",
-                    model=model_path,
-                    torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                )
-                
-                # Update progress to 100% - done loading
-                pbar.update(75)
-        except Exception as e:
-            print(f"Error loading Llama model: {e}")
-            return []
-        
-        # Format the timestamp for the prompt
-        timestamp_str = document_timestamp.strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Construct the messages for the model
-        system_prompt = "You are a medical AI assistant specialized in extracting temporal expressions from clinical notes."
-        
-        user_prompt = f"""
-TASK: Find ALL relative date expressions in the clinical note below and convert them to absolute dates.
-
-DOCUMENT CREATION DATE: {timestamp_str}
-
-CLINICAL NOTE TEXT:
-"{text}"
-
-WHAT TO FIND (Relative Date Expressions):
-- Time ago: "6 months ago", "3 years ago", "last week", "yesterday", "three days prior"
-- Duration references: "3-month history", "over the past 2 weeks", "for the past year", "2-week history"
-- Contextual time: "last Tuesday", "next month", "this past year", "earlier this week"  
-- Prior/before references: "5 years prior", "diagnosed 2 years before", "2 weeks prior to presentation"
-- Future references: "in 6 months", "follow up in 3 weeks", "scheduled next month", "in 1 week"
-- Vague temporal: "recently", "last visit", "previous consultation", "last month"
-
-WHAT NOT TO FIND (Absolute Dates - IGNORE THESE):
-- Specific dates: "2023-08-15", "15/11/2023", "October 3, 2023", "22 Aug 2023"
-- Birth dates: "DOB: 1975-03-15"
-- Any date in YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, or "Month DD, YYYY" format
-
-INSTRUCTIONS:
-1. Search the ENTIRE text for phrases that express time RELATIVE to the document date
-2. IGNORE any absolute/specific dates - only find expressions that are relative to "now"
-3. For each relative phrase found, note its EXACT start position in the original text
-4. Calculate the absolute date based on the document creation date
-5. Be thorough - include duration patterns like "3-month history", "over the past X", "in X weeks/months"
-
-RETURN FORMAT: JSON array with objects containing:
-- "phrase": exact text of the relative date expression
-- "start_index": character position where phrase starts in the text
-- "calculated_date": absolute date in YYYY-MM-DD format
-
-COMPREHENSIVE EXAMPLES:
-Text: "Patient has 3-month history of symptoms. Surgery was 2 years ago. Follow-up in 6 months. Over the past 2 weeks, symptoms worsened. Last visit was on 2023-06-01."
-Document date: 2023-06-09
-Result:
-[
-  {{"phrase": "3-month history", "start_index": 12, "calculated_date": "2023-03-09"}},
-  {{"phrase": "2 years ago", "start_index": 48, "calculated_date": "2021-06-09"}},
-  {{"phrase": "in 6 months", "start_index": 75, "calculated_date": "2023-12-09"}},
-  {{"phrase": "Over the past 2 weeks", "start_index": 90, "calculated_date": "2023-05-26"}},
-  {{"phrase": "Last visit", "start_index": 124, "calculated_date": "2023-06-01"}}
-]
-Note: "2023-06-01" would NOT be included as it's an absolute date.
-
-If NO relative dates found, return: []
-
-JSON RESULT:"""
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Run inference with the model
-        outputs = pipe(
-            messages,
-            max_new_tokens=1000,
-            do_sample=False,
-            temperature=None,
-        )
-        
-        # Extract response content
-        response_content = ""
-        try:
-            # Get the last message from the generated conversation
-            last_message = outputs[0]["generated_text"][-1]
-            
-            # The last message should be a dict with the assistant's response
-            if isinstance(last_message, dict) and "content" in last_message:
-                response_content = last_message["content"].strip()
-            else:
-                # If it's not a dict with content, try to use it directly
-                response_content = str(last_message).strip()
-        except (IndexError, KeyError, AttributeError) as e:
-            print(f"Error extracting response from Llama model output: {e}")
-            return []
-        
-        # Extract JSON from the response
-        start_idx = response_content.find('[')
-        end_idx = response_content.rfind(']') + 1
-        
-        if start_idx >= 0 and end_idx > start_idx:
-            json_str = response_content[start_idx:end_idx]
-            
-            try:
-                dates_data = safe_json_loads(json_str)
-                
-                # Convert to the expected tuple format
-                relative_dates = []
-                for item in dates_data:
-                    phrase = item.get('phrase', '')
-                    start_index = item.get('start_index', 0)
-                    calculated_date = item.get('calculated_date', '')
-                    
-                    # Only add valid entries
-                    if phrase and calculated_date:
-                        # Filter out phrases that look like absolute dates
-                        import re
-                        absolute_date_patterns = [
-                            r'\b\d{4}-\d{1,2}-\d{1,2}\b',          # YYYY-MM-DD
-                            r'\b\d{1,2}/\d{1,2}/\d{4}\b',          # DD/MM/YYYY or MM/DD/YYYY
-                            r'\b\w+ \d{1,2}, \d{4}\b',             # Month DD, YYYY
-                            r'\b\d{1,2} \w+ \d{4}\b',              # DD Month YYYY
-                        ]
-                        
-                        is_absolute_date = any(re.search(pattern, phrase) for pattern in absolute_date_patterns)
-                        
-                        if not is_absolute_date:
-                            relative_dates.append((calculated_date, phrase, start_index))
-                
-                return relative_dates
-            except json.JSONDecodeError as e:
-                print(f"Error parsing Llama JSON response: {e}")
-                return []
-        else:
-            print("No JSON array found in Llama response")
-            return []
-    
-    except Exception as e:
-        print(f"Error in Llama relative date extraction: {e}")
-        return []
-
-def aggregate_predictions_by_patient(all_predictions):
-    """
-    Aggregate predictions by patient to create patient timelines.
-    
-    Args:
-        all_predictions (list): List of predicted relationships with patient_id, note_id, entity_label, entity_category, date, confidence.
-        
-    Returns:
-        dict: Dictionary with patient_id as keys and list of entity-date relationships as values.
-              Format: {patient_id: [{'entity_label': str, 'entity_category': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
-    """
-    patient_timelines = {}
-    
-    for prediction in all_predictions:
-        patient_id = prediction.get('patient_id')
-        if patient_id is None:
-            continue
-            
-        if patient_id not in patient_timelines:
-            patient_timelines[patient_id] = []
-        
-        # Handle legacy format (with 'diagnosis' instead of 'entity_label')
-        if 'diagnosis' in prediction and 'entity_label' not in prediction:
-            entity_label = prediction['diagnosis']
-            entity_category = 'disorder'  # Default category for legacy format
-        else:
-            entity_label = prediction.get('entity_label')
-            entity_category = prediction.get('entity_category', 'unknown')
-        
-        patient_timelines[patient_id].append({
-            'entity_label': entity_label,
-            'entity_category': entity_category,
-            'date': prediction['date'],
-            'confidence': prediction.get('confidence', 1.0),
-            'note_id': prediction['note_id']
-        })
-    
-    # Sort each patient's timeline by date
-    for patient_id in patient_timelines:
-        patient_timelines[patient_id].sort(key=lambda x: x['date'])
-    
-    return patient_timelines
-
-def generate_patient_timelines(patient_timelines, output_dir, extractor_name):
-    """
-    Generate and save patient timeline files.
-    
-    Args:
-        patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
-                                  Format: {patient_id: [{'entity_label': str, 'entity_category': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
-        output_dir (str): Directory to save timeline files.
-        extractor_name (str): Name of the extractor for file naming.
-    """
-    if not patient_timelines:
-        print(f"No patient timelines to generate for {extractor_name}")
-        return
-    
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Generate timeline for each patient
-    for patient_id, timeline in patient_timelines.items():
-        if not timeline:
-            continue
-            
-        # Create timeline filename
-        safe_extractor_name = re.sub(r'[^\w.-]+', '_', extractor_name).lower()
-        timeline_filename = f"patient_{patient_id}_{safe_extractor_name}_timeline.txt"
-        timeline_path = os.path.join(output_dir, timeline_filename)
-        
-        # Write timeline to file
-        with open(timeline_path, 'w', encoding='utf-8') as f:
-            f.write(f"Patient {patient_id} Timeline (Generated by {extractor_name})\n")
-            f.write("=" * 60 + "\n\n")
-            
-            for entry in timeline:
-                f.write(f"Date: {entry['date']}\n")
-                f.write(f"Entity: {entry['entity_label']} ({entry['entity_category']})\n")
-                f.write(f"Confidence: {entry['confidence']:.3f}\n")
-                f.write(f"Source Note: {entry['note_id']}\n")
-                f.write("-" * 40 + "\n")
-            
-            # Summary statistics
-            f.write(f"\nSummary:\n")
-            f.write(f"Total entities: {len(timeline)}\n")
-            f.write(f"Unique entities: {len(set(entry['entity_label'] for entry in timeline))}\n")
-            f.write(f"Entity categories: {len(set(entry['entity_category'] for entry in timeline))}\n")
-            f.write(f"Date range: {timeline[0]['date']} to {timeline[-1]['date']}\n")
-    
-    print(f"Generated {len(patient_timelines)} patient timeline files in {output_dir}")
-
-def generate_patient_timeline_summary(patient_timelines, output_dir, extractor_name):
-    """
-    Generate a summary report of all patient timelines.
-    
-    Args:
-        patient_timelines (dict): Dictionary from aggregate_predictions_by_patient.
-                                  Format: {patient_id: [{'entity_label': str, 'entity_category': str, 'date': str, 'confidence': float, 'note_id': int}, ...]}
-        output_dir (str): Directory to save the summary file.
-        extractor_name (str): Name of the extractor for file naming.
-    """
-    if not patient_timelines:
-        return
-    
-    os.makedirs(output_dir, exist_ok=True)
-    
-    safe_extractor_name = re.sub(r'[^\w.-]+', '_', extractor_name).lower()
-    summary_filename = f"patient_timelines_summary_{safe_extractor_name}.txt"
-    summary_path = os.path.join(output_dir, summary_filename)
-    
-    with open(summary_path, 'w', encoding='utf-8') as f:
-        f.write(f"Patient Timeline Summary - {extractor_name}\n")
-        f.write("=" * 60 + "\n\n")
-        
-        # Overall statistics
-        total_patients = len(patient_timelines)
-        total_entities = sum(len(timeline) for timeline in patient_timelines.values())
-        avg_entities_per_patient = total_entities / total_patients if total_patients > 0 else 0
-        
-        # Collect all unique categories
-        all_categories = set()
-        for timeline in patient_timelines.values():
-            for entry in timeline:
-                all_categories.add(entry.get('entity_category', 'unknown'))
-        
-        f.write(f"Total Patients: {total_patients}\n")
-        f.write(f"Total Entities: {total_entities}\n")
-        f.write(f"Average Entities per Patient: {avg_entities_per_patient:.2f}\n")
-        f.write(f"Entity Categories: {', '.join(sorted(all_categories))}\n\n")
-        
-        # Per-patient summary
-        f.write("Per-Patient Summary:\n")
-        f.write("-" * 40 + "\n")
-        
-        for patient_id, timeline in sorted(patient_timelines.items()):
-            if timeline:
-                unique_entities = len(set(entry['entity_label'] for entry in timeline))
-                unique_categories = len(set(entry.get('entity_category', 'unknown') for entry in timeline))
-                date_range = f"{timeline[0]['date']} to {timeline[-1]['date']}"
-                f.write(f"Patient {patient_id}: {len(timeline)} entities, {unique_entities} unique, {unique_categories} categories, {date_range}\n")
-            else:
-                f.write(f"Patient {patient_id}: No entities\n")
-    
-    print(f"Generated patient timeline summary: {summary_path}")
-
-def calculate_entity_metrics(prepared_test_data, entity_gold, output_dir):
-    """
-    Evaluates the entity extraction (NER) performance by comparing extracted entities with gold standard.
-    
-    Args:
-        prepared_test_data (list): List of dicts containing extracted entities.
-        entity_gold (list): List of gold standard entities.
-        output_dir (str): Directory to save evaluation outputs.
-        
-    Returns:
-        dict: A dictionary containing calculated metrics.
-    """
-    print("\n--- Evaluating Entity Extraction (NER) ---")
-    if not entity_gold:
-        print("No entity_gold data provided. Skipping NER evaluation.")
-        return {'precision': 0, 'recall': 0, 'f1': 0}
-
-    # Create sets for comparison
-    # Using (note_id, entity_label, entity_category, start, end) as the key for strict matching
-    gold_entities_set = set(
-        (g['note_id'], g['entity_label'], g['entity_category'], g['start'], g['end'])
-        for g in entity_gold
-    )
-
-    # Extract predicted entities from prepared_test_data
-    predicted_entities_set = set()
-    for note_data in prepared_test_data:
-        note_id = note_data['note_id']
-        for entity in note_data['extracted_entities']:
-            predicted_entities_set.add(
-                (note_id, entity['label'], entity['category'], entity['start'], entity['end'])
-            )
-
-    # Calculate metrics
-    true_positives = len(predicted_entities_set & gold_entities_set)
-    false_positives = len(predicted_entities_set - gold_entities_set)
-    false_negatives = len(gold_entities_set - predicted_entities_set)
-
-    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
-    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-
-    print(f"  Entity Evaluation Results:")
-    print(f"  Total unique gold entities:     {len(gold_entities_set)}")
-    print(f"  Total unique predicted entities: {len(predicted_entities_set)}")
-    print(f"  True Positives:  {true_positives}")
-    print(f"  False Positives: {false_positives}")
-    print(f"  False Negatives: {false_negatives}")
-    print(f"  Precision: {precision:.3f}")
-    print(f"  Recall:    {recall:.3f}")
-    print(f"  F1 Score:  {f1:.3f}")
-    
-    # Plot confusion matrix
-    try:
-        plt.figure(figsize=(8, 6))
-        conf_matrix_display_array = np.array([[0, false_positives], [false_negatives, true_positives]])
-        
-        # Create clearer labels
-        display_labels = ['No Entity', 'Entity']
-        
-        # Create the confusion matrix display without automatic text
-        disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix_display_array, display_labels=display_labels)
-        ax = disp.plot(cmap=plt.cm.Blues, values_format='', text_kw={'alpha': 0})
-        
-        # Add our own text annotations for each quadrant
-        ax.text(0, 0, f'TN\n-', ha='center', va='center', fontsize=11)
-        ax.text(1, 0, f'FP\n{false_positives}', ha='center', va='center', fontsize=11, color='white' if false_positives > 20 else 'black')
-        ax.text(0, 1, f'FN\n{false_negatives}', ha='center', va='center', fontsize=11, color='white' if false_negatives > 20 else 'black')
-        ax.text(1, 1, f'TP\n{true_positives}', ha='center', va='center', fontsize=11, color='white' if true_positives > 20 else 'black')
-        
-        # Set axis labels
-        ax.set_ylabel('Actual', fontsize=12)
-        ax.set_xlabel('Predicted', fontsize=12)
-        
-        # Title with metrics
-        plt.title(f"Entity Extraction Confusion Matrix\nPrec: {precision:.3f} | Rec: {recall:.3f} | F1: {f1:.3f}", 
-                fontsize=12, pad=20)
-        
-        # Adjust layout
-        plt.tight_layout()
-
-        os.makedirs(output_dir, exist_ok=True)
-        plot_filename = os.path.join(output_dir, "entity_extraction_confusion_matrix.png")
-        plt.savefig(plot_filename)
-        print(f"  Entity confusion matrix saved to {plot_filename}")
-        plt.close()
-    except Exception as e:
-        print(f"  Error saving entity confusion matrix: {e}")
-
-    return {'precision': precision, 'recall': recall, 'f1': f1}
