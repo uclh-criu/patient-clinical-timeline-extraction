@@ -15,6 +15,7 @@ import training_config_bert as training_config
 # Import utility functions
 from training_utils_bert import prepare_bert_training_data, train_bert_model
 from custom_model_training.training_utils_custom import plot_training_curves
+from utils.inference_utils import load_and_prepare_data
 
 def main():
     """
@@ -38,11 +39,24 @@ def main():
     model_path = os.path.join(project_root, config.BERT_MODEL_PATH)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     
-    # Prepare data
+    # First, load the training split using load_and_prepare_data
+    # This ensures we're using the same split logic as in inference
+    print("Loading training split...")
+    if config.ENTITY_MODE == 'disorder_only':
+        prepared_train_data, relationship_gold = load_and_prepare_data(
+            data_path, None, config, data_split_mode='train'
+        )
+    else:
+        prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
+            data_path, None, config, data_split_mode='train'
+        )
+    
+    # Prepare data with the 'train' data split
     train_dataset, val_dataset, tokenizer = prepare_bert_training_data(
         data_path, 
         training_config.BERT_PRETRAINED_MODEL,
-        training_config.BERT_MAX_SEQ_LENGTH
+        training_config.BERT_MAX_SEQ_LENGTH,
+        data_split_mode='train'
     )
     
     # Check if we have training data

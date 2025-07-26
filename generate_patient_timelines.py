@@ -8,7 +8,7 @@ from tqdm import tqdm
 import config
 
 # Import from utility modules
-from utils.inference_utils import get_data_path
+from utils.inference_utils import get_data_path, load_and_prepare_data
 from utils.post_processing_utils import (
     aggregate_predictions_by_patient,
     generate_patient_timelines,
@@ -40,10 +40,37 @@ def create_patient_timelines():
     timeline_output_dir = os.path.join(project_root, config.TIMELINE_OUTPUT_DIR)
     os.makedirs(timeline_output_dir, exist_ok=True)
 
+    # --- Load the test split of the dataset ---
+    # This ensures we're working with the same subset of data as inference and evaluation
+    try:
+        # Load the test split (without actually using the prepared data)
+        if config.ENTITY_MODE == 'disorder_only':
+            _, _ = load_and_prepare_data(dataset_path, config.INFERENCE_SAMPLES, config, data_split_mode='test')
+        else:
+            _, _, _, _ = load_and_prepare_data(dataset_path, config.INFERENCE_SAMPLES, config, data_split_mode='test')
+            
+        # The load_and_prepare_data function will print info about the test split
+    except Exception as e:
+        print(f"Warning: Could not load test split data: {e}")
+        print("Proceeding with the full dataset...")
+
     # --- Load predictions from CSV ---
     try:
         # Load the CSV file with the predictions
         df = pd.read_csv(dataset_path)
+        
+        # Apply the same test split logic as in load_and_prepare_data
+        if hasattr(config, 'TRAINING_SET_RATIO'):
+            train_ratio = config.TRAINING_SET_RATIO
+            split_idx = int(len(df) * train_ratio)
+            df = df.sort_index(kind='stable')
+            df = df.iloc[split_idx:]  # Use only the test portion
+            print(f"Using test split: {len(df)} records (last {(1-train_ratio)*100:.0f}%)")
+        
+        # If a specific number of samples is requested, limit to that
+        if hasattr(config, 'INFERENCE_SAMPLES') and config.INFERENCE_SAMPLES and config.INFERENCE_SAMPLES < len(df):
+            df = df.iloc[:config.INFERENCE_SAMPLES]
+            print(f"Limiting to {config.INFERENCE_SAMPLES} samples.")
         
         # Form the column name based on extraction method
         safe_extractor_name = config.EXTRACTION_METHOD.lower().replace(' ', '_')

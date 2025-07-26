@@ -33,8 +33,8 @@ def evaluate_predictions():
     dataset_path = get_data_path(config)
     print(f"Dataset: {dataset_path}")
     
-    # Use the NUM_TEST_SAMPLES from config
-    num_test_samples = config.NUM_TEST_SAMPLES
+    # Use the INFERENCE_SAMPLES from config
+    num_samples = config.INFERENCE_SAMPLES
 
     # Define the output directory for metric results
     if 'project_root' not in locals() and 'project_root' not in globals():
@@ -46,12 +46,12 @@ def evaluate_predictions():
     print("Loading gold standard data...")
     if config.ENTITY_MODE == 'disorder_only':
         # In disorder_only mode, load_and_prepare_data returns only 2 values
-        prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_test_samples, config)
+        prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
         # Set entity_gold to None as it's not used in disorder_only mode
         entity_gold = None
     else:
         # In multi_entity mode, load_and_prepare_data returns 4 values
-        prepared_test_data, entity_gold, relationship_gold, _ = load_and_prepare_data(dataset_path, num_test_samples, config)
+        prepared_test_data, entity_gold, relationship_gold, _ = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
     
     if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting evaluation.")

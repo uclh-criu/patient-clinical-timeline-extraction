@@ -7,7 +7,7 @@ import config # Import the config module
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length):
+def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, data_split_mode='all'):
     """
     Prepare data for training the BERT model.
     
@@ -15,6 +15,10 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length):
         csv_path: Path to the CSV dataset
         pretrained_model_name: Name or path of the pretrained BERT model
         max_seq_length: Maximum sequence length for tokenization
+        data_split_mode (str): How to split the data. Options:
+            - 'train': Use only the training portion (first TRAINING_SET_RATIO)
+            - 'test': Use only the testing portion (remaining 1-TRAINING_SET_RATIO)
+            - 'all': Use all data without splitting (default)
         
     Returns:
         tuple: (train_dataset, val_dataset, tokenizer) - datasets and tokenizer
@@ -35,9 +39,11 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length):
     if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):
         setattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION', False)
     
-    # Load the data using the canonical function
+    # Load the data using the canonical function with the specified data split mode
+    print(f"Loading data with split mode: {data_split_mode}")
+    
     # Handle different return signatures based on ENTITY_MODE
-    result = load_and_prepare_data(csv_path, None, config)
+    result = load_and_prepare_data(csv_path, None, config, data_split_mode=data_split_mode)
     
     # In disorder_only mode, load_and_prepare_data returns only 2 values
     # In multi_entity mode, it returns 4 values

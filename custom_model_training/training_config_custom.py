@@ -17,4 +17,3 @@ NUM_EPOCHS = 10  # Number of training epochs (alias for EPOCHS)
 DROPOUT = 0.3  # Dropout rate for regularization
 USE_DISTANCE_FEATURE = True  # Whether to use distance between diagnosis and date as a feature
 USE_POSITION_FEATURE = True  # Whether to use relative position (diagnosis before date) as a feature
-TEST_SIZE = 0.2  # Proportion of data to use for testing

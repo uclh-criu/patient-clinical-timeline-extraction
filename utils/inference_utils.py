@@ -139,7 +139,7 @@ def _parse_entity_column(data_string):
         print(f"Warning: Could not parse entity data string. Error: {e}. Data: '{str(data_string)[:100]}...'")
         return []
 
-def load_and_prepare_data(dataset_path, num_samples, config=None):
+def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mode='all'):
     """
     Loads dataset, selects samples, prepares gold standard, and pre-extracts entities.
     Supports real data from CSV files.
@@ -148,6 +148,10 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
         dataset_path (str): Path to the dataset file (CSV). If None, will use config.DATA_SOURCE to determine path.
         num_samples (int): Maximum number of samples to use (if provided).
         config: Configuration object containing paths and column names.
+        data_split_mode (str): How to split the data. Options:
+            - 'train': Return only the training portion (first TRAINING_SET_RATIO)
+            - 'test': Return only the testing portion (remaining 1-TRAINING_SET_RATIO)
+            - 'all': Return all data without splitting (default)
         
     Returns:
         tuple: In multi_entity mode: (prepared_test_data, entity_gold, relationship_gold, pa_likelihood_gold) or (None, None, None, None) if loading fails.
@@ -165,6 +169,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
     # Print diagnostic information
     print(f"\n===== LOAD_AND_PREPARE_DATA =====")
     print(f"Entity mode: {entity_mode}")
+    print(f"Data split mode: {data_split_mode}")
     
         # If dataset_path is not provided and config is available, use config to determine path
     if dataset_path is None and config:
@@ -224,10 +229,32 @@ def load_and_prepare_data(dataset_path, num_samples, config=None):
             
         print(f"Found {len(df)} records in CSV.")
         
+        # Apply train/test split if requested
+        if data_split_mode != 'all' and hasattr(config, 'TRAINING_SET_RATIO') and hasattr(config, 'DATA_SPLIT_RANDOM_SEED'):
+            # Get the split ratio and random seed from config
+            train_ratio = config.TRAINING_SET_RATIO
+            random_seed = config.DATA_SPLIT_RANDOM_SEED
+            
+            # Calculate the split index
+            split_idx = int(len(df) * train_ratio)
+            
+            # Sort the dataframe to ensure consistent splits
+            # We use the index as the sort key to maintain reproducibility
+            df = df.sort_index(kind='stable')
+            
+            # Apply the split
+            if data_split_mode == 'train':
+                df = df.iloc[:split_idx]
+                print(f"Using training split: {len(df)} records (first {train_ratio*100:.0f}%)")
+            elif data_split_mode == 'test':
+                df = df.iloc[split_idx:]
+                print(f"Using testing split: {len(df)} records (last {(1-train_ratio)*100:.0f}%)")
+        
         # If a specific number of samples is requested, limit to that
+        # This happens AFTER the train/test split, so INFERENCE_SAMPLES limits the samples from the selected split
         if num_samples and num_samples < len(df):
             df = df.iloc[:num_samples]
-            print(f"Limiting to {num_samples} samples.")
+            print(f"Limiting to {num_samples} samples from the {'training' if data_split_mode == 'train' else 'testing' if data_split_mode == 'test' else 'entire'} dataset.")
         
         # Note: Relative date extraction is now handled by extract_relative_dates.py
         relative_date_extraction_enabled = False

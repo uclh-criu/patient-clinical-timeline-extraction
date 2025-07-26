@@ -31,7 +31,7 @@ def sanitize_datetime_strings(s):
     
     return re.sub(pattern, replace_date, s)
 
-def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class=None):
+def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class=None, data_split_mode='all'):
     """
     Prepare data for training the custom model.
     
@@ -39,6 +39,10 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
         dataset_path_or_data: Either a file path to a CSV dataset or the dataset itself
         max_distance: Maximum distance (in characters) between diagnosis and date to include
         vocab_class: Optional vocabulary class to build vocabulary
+        data_split_mode (str): How to split the data. Options:
+            - 'train': Use only the training portion (first TRAINING_SET_RATIO)
+            - 'test': Use only the testing portion (remaining 1-TRAINING_SET_RATIO)
+            - 'all': Use all data without splitting (default)
         
     Returns:
         tuple: (features, labels, vocab) - processed data and vocabulary instance
@@ -51,7 +55,7 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
     
     if isinstance(dataset_path_or_data, str):
         # It's a file path, use the canonical function to load it
-        print(f"Loading data from file: {dataset_path_or_data}")
+        print(f"Loading data from file: {dataset_path_or_data} with split mode: {data_split_mode}")
         
         # Make sure we have the necessary config attributes for training
         if not hasattr(config, 'RELATIONSHIP_GOLD_COLUMN'):
@@ -64,7 +68,7 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
             setattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION', False)
             
         # Handle different return signatures based on ENTITY_MODE
-        result = canonical_load(dataset_path_or_data, None, config)
+        result = canonical_load(dataset_path_or_data, None, config, data_split_mode=data_split_mode)
         
         # In disorder_only mode, load_and_prepare_data returns only 2 values
         # In multi_entity mode, it returns 4 values

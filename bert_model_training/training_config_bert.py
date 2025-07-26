@@ -11,4 +11,3 @@ BERT_MAX_SEQ_LENGTH = 512  # Maximum sequence length for BERT
 BERT_BATCH_SIZE = 8  # Batch size for BERT training
 BERT_LEARNING_RATE = 2e-5  # Learning rate for BERT fine-tuning
 BERT_NUM_TRAIN_EPOCHS = 3  # Number of epochs for BERT fine-tuning
-BERT_CONFIDENCE_THRESHOLD = 0.185  # Confidence threshold for BERT predictions

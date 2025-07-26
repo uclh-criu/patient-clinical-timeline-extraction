@@ -14,6 +14,9 @@ ENTITY_MODE = "disorder_only"
 # Controls the extraction method to use for the relation extraction task.
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
 EXTRACTION_METHOD = 'naive'
+TRAINING_SET_RATIO = 0.8 # The ratio of data to be used for the training set. The rest will be used for the test/inference set.
+DATA_SPLIT_RANDOM_SEED = 42 # A fixed random seed to ensure the train/test split is always the same.
+INFERENCE_SAMPLES = 5 # Limits the number of samples used from the test set. Set to None to use all test samples.
 
 # --- Data File Paths --- #
 SAMPLE_DATA_PATH = 'data/sample.csv'
@@ -43,9 +46,11 @@ MODEL_PATH = 'custom_model_training/best_model.pt'
 VOCAB_PATH = 'custom_model_training/vocab.pt'
 PREDICTION_MAX_DISTANCE = 500 # Max char distance used by custom_extractor when finding candidate pairs
 PREDICTION_MAX_CONTEXT_LEN = 512 # Max sequence length used by custom_extractor when creating input tensors
+CUSTOM_CONFIDENCE_THRESHOLD = 0.5 # Confidence threshold for custom model predictions
 
 # --- BERT Extractor Parameters --- #
 BERT_MODEL_PATH = './bert_model_training/bert_model'
+BERT_CONFIDENCE_THRESHOLD = 0.185  # Confidence threshold for BERT predictions
 
 # --- Llama Extractor Parameters --- #
 LLAMA_MODEL_PATH = './Llama-3.2-3B-Instruct'
@@ -69,9 +74,6 @@ RELATIVE_DATE_CONTEXT_WINDOW = 2500         # Maximum context window to send to 
 # --- Debug Settings --- #
 DEBUG_MODE = False  # Set to True for verbose logging during API calls and data processing
 MODEL_DEBUG_MODE = True  # Set to True to enable diagnostic prints in the model during training and inference
-NUM_TEST_SAMPLES = 5  # Number of samples to use for testing. Set to None to use all available samples.
-
-
 
 # --- Hardware Settings --- #
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 

@@ -21,7 +21,8 @@ import custom_model_training.training_config_custom as training_config_custom
 # Files from other top-level directories
 from custom_model_training.training_utils_custom import prepare_custom_training_data
 from custom_model_training.training_utils_custom import train_model, plot_training_curves
-from config import DEVICE, MODEL_PATH, VOCAB_PATH
+from config import DEVICE, MODEL_PATH, VOCAB_PATH, TRAINING_SET_RATIO, DATA_SPLIT_RANDOM_SEED
+from utils.inference_utils import load_and_prepare_data
 
 def train():
     print(f"Using device: {DEVICE}")
@@ -64,11 +65,25 @@ def train():
     
     print(f"Loading training data from: {training_data_path}")
     
-    # Use the canonical data preparation pipeline
+    # Use the canonical data preparation pipeline with the 'train' data split
     # This will directly load the CSV file and parse all entities and relationships
     print("Loading and preparing data...")
+    
+    # First, load the training split using load_and_prepare_data
+    # This ensures we're using the same split logic as in inference
+    import config as main_config
+    if main_config.ENTITY_MODE == 'disorder_only':
+        prepared_train_data, relationship_gold = load_and_prepare_data(
+            training_data_path, None, main_config, data_split_mode='train'
+        )
+    else:
+        prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
+            training_data_path, None, main_config, data_split_mode='train'
+        )
+    
+    # Now prepare the training features using the training data
     features, labels, _ = prepare_custom_training_data(
-        training_data_path, training_config_custom.MAX_DISTANCE, None
+        training_data_path, training_config_custom.MAX_DISTANCE, None, data_split_mode='train'
     )
     print(f"Loaded {len(features)} examples")
     

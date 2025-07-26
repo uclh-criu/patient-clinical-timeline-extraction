@@ -31,17 +31,18 @@ def run_inference():
     dataset_path = get_data_path(config)
     print(f"Dataset: {dataset_path}")
     
-    # Use the NUM_TEST_SAMPLES from config
-    num_test_samples = config.NUM_TEST_SAMPLES
+    # Use the INFERENCE_SAMPLES from config
+    num_samples = config.INFERENCE_SAMPLES
 
     # Load and prepare data using the helper function
+    # Use 'test' split mode to ensure we're using the holdout test set
     print("Loading and preparing data...")
     if config.ENTITY_MODE == 'disorder_only':
         # In disorder_only mode, load_and_prepare_data returns only 2 values
-        prepared_test_data, _ = load_and_prepare_data(dataset_path, num_test_samples, config)
+        prepared_test_data, _ = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
     else:
         # In multi_entity mode, load_and_prepare_data returns 4 values
-        prepared_test_data, _, _, _ = load_and_prepare_data(dataset_path, num_test_samples, config)
+        prepared_test_data, _, _, _ = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
     
     if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting.")
