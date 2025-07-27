@@ -22,7 +22,7 @@ import custom_model_training.training_config_custom as training_config_custom
 from custom_model_training.training_utils_custom import prepare_custom_training_data
 from custom_model_training.training_utils_custom import train_model, plot_training_curves
 from config import DEVICE, MODEL_PATH, VOCAB_PATH, TRAINING_SET_RATIO, DATA_SPLIT_RANDOM_SEED
-from utils.inference_utils import load_and_prepare_data
+from utils.inference_eval_utils import load_and_prepare_data
 
 def train():
     print(f"Using device: {DEVICE}")

@@ -47,8 +47,8 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
     Returns:
         tuple: (features, labels, vocab) - processed data and vocabulary instance
     """
-    from utils.inference_utils import load_and_prepare_data as canonical_load
-    from utils.inference_utils import preprocess_note_for_prediction, transform_python_to_json
+    from utils.inference_eval_utils import load_and_prepare_data as canonical_load
+    from utils.inference_eval_utils import preprocess_note_for_prediction, transform_python_to_json
     
     # Initialize vocabulary if needed
     vocab = vocab_class() if vocab_class else None

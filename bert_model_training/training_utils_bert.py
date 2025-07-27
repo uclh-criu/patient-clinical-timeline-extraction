@@ -27,7 +27,7 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
     from BertEntityPairDataset import BertEntityPairDataset
     
     # Import the canonical load_and_prepare_data function
-    from utils.inference_utils import load_and_prepare_data
+    from utils.inference_eval_utils import load_and_prepare_data
     
     # Ensure config has the necessary attributes for BERT training
     if not hasattr(config, 'RELATIONSHIP_GOLD_COLUMN'):

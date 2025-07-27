@@ -4,7 +4,7 @@ from extractors.base_extractor import BaseRelationExtractor
 from custom_model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
 from custom_model_training.Vocabulary import Vocabulary
 from custom_model_training.training_config_custom import EMBEDDING_DIM, HIDDEN_DIM
-from utils.inference_utils import preprocess_note_for_prediction, create_prediction_dataset, predict_relationships
+from utils.inference_eval_utils import preprocess_note_for_prediction, create_prediction_dataset, predict_relationships
 
 class CustomExtractor(BaseRelationExtractor):
     """

@@ -15,7 +15,7 @@ import training_config_bert as training_config
 # Import utility functions
 from training_utils_bert import prepare_bert_training_data, train_bert_model
 from custom_model_training.training_utils_custom import plot_training_curves
-from utils.inference_utils import load_and_prepare_data
+from utils.inference_eval_utils import load_and_prepare_data
 
 def main():
     """

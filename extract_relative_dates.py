@@ -9,7 +9,7 @@ from tqdm import tqdm
 import config
 
 # Import from utility modules
-from utils.inference_utils import get_data_path, safe_json_loads, transform_python_to_json
+from utils.inference_eval_utils import get_data_path, safe_json_loads, transform_python_to_json
 from utils.relative_date_utils import extract_relative_dates_llm
 
 def extract_relative_dates():

@@ -8,7 +8,7 @@ from tqdm import tqdm
 import config
 
 # Import from utility modules
-from utils.inference_utils import get_data_path, load_and_prepare_data
+from utils.inference_eval_utils import get_data_path, load_and_prepare_data
 from utils.post_processing_utils import (
     aggregate_predictions_by_patient,
     generate_patient_timelines,

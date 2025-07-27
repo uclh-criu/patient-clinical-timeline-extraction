@@ -9,23 +9,28 @@ from extractors.extractor_factory import create_extractor
 import config
 
 # Import from utility modules
-from utils.inference_utils import (
+from utils.inference_eval_utils import (
     load_and_prepare_data,
     run_extraction,
-    get_data_path
+    get_data_path,
+    calculate_entity_metrics,
+    calculate_and_report_metrics
 )
 
-def run_inference():
+def run_inference_and_evaluate():
     """
-    Run the specified extraction method on the dataset and save predictions to CSV.
+    Run the specified extraction method on the dataset, save predictions to CSV,
+    and evaluate the predictions against the gold standard.
     
     This script:
     1. Loads the dataset specified in config
     2. Initializes and loads the extractor model
     3. Runs extraction to get predictions
     4. Saves predictions to a new column in the original CSV file
+    5. Evaluates the predictions against the gold standard
+    6. Outputs evaluation metrics and confusion matrices
     """
-    print(f"\n=== Running Inference with {config.EXTRACTION_METHOD} ===")
+    print(f"\n=== Running Inference and Evaluation with {config.EXTRACTION_METHOD} ===")
     
     # Use get_data_path to determine the dataset path
     dataset_path = get_data_path(config)
@@ -34,15 +39,23 @@ def run_inference():
     # Use the INFERENCE_SAMPLES from config
     num_samples = config.INFERENCE_SAMPLES
 
+    # Define the output directory for metric results
+    if 'project_root' not in locals() and 'project_root' not in globals():
+        project_root = os.path.dirname(os.path.abspath(__file__))
+    EXPERIMENT_OUTPUT_DIR = os.path.join(project_root, "experiment_outputs")
+    os.makedirs(EXPERIMENT_OUTPUT_DIR, exist_ok=True)
+
     # Load and prepare data using the helper function
     # Use 'test' split mode to ensure we're using the holdout test set
     print("Loading and preparing data...")
     if config.ENTITY_MODE == 'disorder_only':
         # In disorder_only mode, load_and_prepare_data returns only 2 values
-        prepared_test_data, _ = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
+        prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
+        # Set entity_gold to None as it's not used in disorder_only mode
+        entity_gold = None
     else:
         # In multi_entity mode, load_and_prepare_data returns 4 values
-        prepared_test_data, _, _, _ = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
+        prepared_test_data, entity_gold, relationship_gold, _ = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
     
     if prepared_test_data is None:
         print("Failed to load or prepare data. Exiting.")
@@ -138,6 +151,48 @@ def run_inference():
         sys.exit(1)
     
     print("\nInference completed successfully!")
+    
+    # Now proceed with evaluation
+    print(f"\n=== Evaluating Predictions for {config.EXTRACTION_METHOD} ===")
+    
+    # --- 3. Entity Extraction (NER) Evaluation ---
+    print("\n--- Entity Extraction (NER) Evaluation ---")
+    if config.ENTITY_MODE == 'disorder_only':
+        # Skip entity metrics in disorder_only mode
+        entity_metrics = {
+            'precision': 0,
+            'recall': 0,
+            'f1': 0
+        }
+        print("Entity extraction evaluation skipped in disorder_only mode.")
+    else:
+        entity_metrics = calculate_entity_metrics(prepared_test_data, entity_gold, EXPERIMENT_OUTPUT_DIR)
+
+    # --- 4. Relationship Extraction (RE) Evaluation ---
+    print("\n--- Relationship Extraction (RE) Evaluation ---")
+    relationship_metrics = calculate_and_report_metrics(
+        all_predictions,
+        relationship_gold,
+        config.EXTRACTION_METHOD,
+        EXPERIMENT_OUTPUT_DIR,
+        len(prepared_test_data),
+        dataset_path
+    )
+    
+    # Print evaluation summary
+    print("\n=== EVALUATION SUMMARY ===")
+    
+    print("Entity Extraction (NER):")
+    print(f"  Precision: {entity_metrics['precision']:.3f}")
+    print(f"  Recall:    {entity_metrics['recall']:.3f}")
+    print(f"  F1 Score:  {entity_metrics['f1']:.3f}")
+    
+    print("\nRelationship Extraction (RE):")
+    print(f"  Precision: {relationship_metrics['precision']:.3f}")
+    print(f"  Recall:    {relationship_metrics['recall']:.3f}")
+    print(f"  F1 Score:  {relationship_metrics['f1']:.3f}")
+    
+    print("\nEvaluation completed!")
 
 if __name__ == "__main__":
-    run_inference()
+    run_inference_and_evaluate() 

@@ -3,7 +3,7 @@ import json
 from tqdm import tqdm
 import pandas as pd
 from dotenv import load_dotenv
-from utils.inference_utils import safe_json_loads
+from utils.inference_eval_utils import safe_json_loads
 
 def extract_relative_dates_llm(text, document_timestamp, config):
     """
