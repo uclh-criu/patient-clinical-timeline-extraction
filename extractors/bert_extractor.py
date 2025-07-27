@@ -23,12 +23,12 @@ class BertExtractor(BaseRelationExtractor):
         
         # Get BERT parameters from training config
         try:
-            from model_training import training_config
-            self.pretrained_model_name = training_config.BERT_PRETRAINED_MODEL
-            self.max_seq_length = training_config.BERT_MAX_SEQ_LENGTH
-            self.confidence_threshold = getattr(training_config, 'BERT_CONFIDENCE_THRESHOLD', 0.2)  # Lower default threshold
+            from bert_model_training import training_config_bert
+            self.pretrained_model_name = training_config_bert.BERT_PRETRAINED_MODEL
+            self.max_seq_length = training_config_bert.BERT_MAX_SEQ_LENGTH
+            self.confidence_threshold = getattr(config, 'BERT_CONFIDENCE_THRESHOLD', 0.185)  # Get from main config
         except (ImportError, AttributeError) as e:
-            print(f"Warning: Could not load training_config. Using default values. Error: {e}")
+            print(f"Warning: Could not load training_config_bert. Using default values. Error: {e}")
             self.pretrained_model_name = 'dmis-lab/biobert-base-cased-v1.1'
             self.max_seq_length = 512
             self.confidence_threshold = 0.185  # Lower threshold

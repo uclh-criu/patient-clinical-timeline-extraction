@@ -30,7 +30,7 @@ def run_inference_and_evaluate():
     5. Evaluates the predictions against the gold standard
     6. Outputs evaluation metrics and confusion matrices
     """
-    print(f"\n=== Running Inference and Evaluation with {config.EXTRACTION_METHOD} ===")
+    print(f"\n=== Running Inference and Evaluation with method: '{config.EXTRACTION_METHOD}' ===")
     
     # Use get_data_path to determine the dataset path
     dataset_path = get_data_path(config)

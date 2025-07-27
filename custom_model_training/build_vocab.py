@@ -12,28 +12,28 @@ sys.path.append(project_root)
 # Import from our modules
 from custom_model_training.Vocabulary import Vocabulary
 import custom_model_training.training_config_custom as training_config
-from custom_model_training.training_utils_custom import preprocess_text
+from utils.inference_eval_utils import preprocess_text
 from config import VOCAB_PATH
 
 def build_vocabulary():
     """
-    Build a vocabulary from the data specified in VOCAB_DATA_PATH in training_config.py
+    Build a vocabulary from the data specified in TRAINING_DATA_PATH in training_config.py
     and save it to the path specified in config.py.
     """
-    print("Building vocabulary from vocabulary data source...")
+    print("Building vocabulary from training data source...")
     
     # Ensure the output directory exists
     vocab_full_path = os.path.join(project_root, VOCAB_PATH)
     os.makedirs(os.path.dirname(vocab_full_path), exist_ok=True)
     
     # Load the vocabulary data
-    vocab_data_path = os.path.join(project_root, training_config.VOCAB_DATA_PATH)
+    vocab_data_path = os.path.join(project_root, training_config.TRAINING_DATA_PATH)
     
     if not os.path.exists(vocab_data_path):
-        print(f"Error: Vocabulary data file not found at {vocab_data_path}")
+        print(f"Error: Training data file not found at {vocab_data_path}")
         sys.exit(1)
     
-    print(f"Loading vocabulary data from: {vocab_data_path}")
+    print(f"Loading training data from: {vocab_data_path}")
     df = pd.read_csv(vocab_data_path)
     
     if 'note' not in df.columns:

@@ -3,17 +3,17 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used for inference, evaluation, and timeline generation.
 # Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated', 'nph'
-DATA_SOURCE = 'synthetic'
+DATA_SOURCE = 'nph'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to use for the relation extraction task.
 # Valid options: 'disorder_only', 'multi_entity'
-ENTITY_MODE = "disorder_only"
+ENTITY_MODE = "multi_entity"
 
 # --- Execution Settings --- #
 # Controls the extraction method to use for the relation extraction task.
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'naive'
+EXTRACTION_METHOD = 'bert'
 TRAINING_SET_RATIO = 0.8 # The ratio of data to be used for the training set. The rest will be used for the test/inference set.
 DATA_SPLIT_RANDOM_SEED = 42 # A fixed random seed to ensure the train/test split is always the same.
 INFERENCE_SAMPLES = 5 # Limits the number of samples used from the test set. Set to None to use all test samples.
