@@ -48,10 +48,10 @@ def run_inference_and_evaluate():
     # Load and prepare data using the helper function
     # Use 'test' split mode to ensure we're using the holdout test set
     print("Loading and preparing data...")
-    if config.ENTITY_MODE == 'disorder_only':
-        # In disorder_only mode, load_and_prepare_data returns only 2 values
+    if config.ENTITY_MODE == 'diagnosis_only':
+        # In diagnosis_only mode, load_and_prepare_data returns only 2 values
         prepared_test_data, relationship_gold = load_and_prepare_data(dataset_path, num_samples, config, data_split_mode='test')
-        # Set entity_gold to None as it's not used in disorder_only mode
+        # Set entity_gold to None as it's not used in diagnosis_only mode
         entity_gold = None
     else:
         # In multi_entity mode, load_and_prepare_data returns 4 values
@@ -88,8 +88,8 @@ def run_inference_and_evaluate():
         safe_extractor_name = extractor.name.lower().replace(' ', '_')
         predictions_column = f"{safe_extractor_name}_predictions"
         
-        # Determine if we're in disorder_only mode
-        disorder_only_mode = (config.ENTITY_MODE == 'disorder_only')
+        # Determine if we're in diagnosis_only mode
+        diagnosis_only_mode = (config.ENTITY_MODE == 'diagnosis_only')
         
         # Create dictionaries to hold predictions by note_id
         note_predictions = {}
@@ -106,9 +106,9 @@ def run_inference_and_evaluate():
                 'confidence': pred.get('confidence', 1.0)
             }
             
-            # Handle different field names between disorder_only and multi_entity modes
-            if disorder_only_mode:
-                # In disorder_only mode, use 'diagnosis' field
+            # Handle different field names between diagnosis_only and multi_entity modes
+            if diagnosis_only_mode:
+                # In diagnosis_only mode, use 'diagnosis' field
                 if 'diagnosis' in pred:
                     pred_obj['diagnosis'] = pred['diagnosis']
                 elif 'entity_label' in pred:
@@ -125,7 +125,7 @@ def run_inference_and_evaluate():
                 elif 'diagnosis' in pred:
                     # Fall back to diagnosis if entity_label is not available
                     pred_obj['entity_label'] = pred['diagnosis']
-                    pred_obj['entity_category'] = 'disorder'
+                    pred_obj['entity_category'] = 'diagnosis'
             
             # Add the prediction object to the list for this note
             note_predictions[note_id].append(pred_obj)
@@ -157,14 +157,14 @@ def run_inference_and_evaluate():
     
     # --- 3. Entity Extraction (NER) Evaluation ---
     print("\n--- Entity Extraction (NER) Evaluation ---")
-    if config.ENTITY_MODE == 'disorder_only':
-        # Skip entity metrics in disorder_only mode
+    if config.ENTITY_MODE == 'diagnosis_only':
+        # Skip entity metrics in diagnosis_only mode
         entity_metrics = {
             'precision': 0,
             'recall': 0,
             'f1': 0
         }
-        print("Entity extraction evaluation skipped in disorder_only mode.")
+        print("Entity extraction evaluation skipped in diagnosis_only mode.")
     else:
         entity_metrics = calculate_entity_metrics(prepared_test_data, entity_gold, EXPERIMENT_OUTPUT_DIR)
 

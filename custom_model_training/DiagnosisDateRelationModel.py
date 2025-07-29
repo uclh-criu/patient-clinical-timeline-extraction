@@ -7,6 +7,7 @@ import os
 # Add project root to path to import config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from custom_model_training.training_config_custom import ENTITY_CATEGORY_EMBEDDING_DIM
 
 # Model architecture
 class DiagnosisDateRelationModel(nn.Module):
@@ -15,6 +16,10 @@ class DiagnosisDateRelationModel(nn.Module):
         
         # Word embeddings
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        
+        # Entity category embeddings (for multi-entity mode)
+        # Hardcoded to 4 categories: diagnosis, symptom, procedure, medication
+        self.entity_category_embedding = nn.Embedding(4, ENTITY_CATEGORY_EMBEDDING_DIM)
         
         # 1D CNN for text features
         self.conv1 = nn.Conv1d(embedding_dim, hidden_dim, kernel_size=3, padding=1)
@@ -27,7 +32,8 @@ class DiagnosisDateRelationModel(nn.Module):
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True, bidirectional=True)
         
         # Fully connected layers
-        self.fc1 = nn.Linear(hidden_dim*2 + 2, hidden_dim)  # +2 for distance and ordering features
+        # +2 for distance and ordering features, +ENTITY_CATEGORY_EMBEDDING_DIM for entity category
+        self.fc1 = nn.Linear(hidden_dim*2 + 2 + ENTITY_CATEGORY_EMBEDDING_DIM, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, 1)
         
         # Dropout for regularization
@@ -36,8 +42,13 @@ class DiagnosisDateRelationModel(nn.Module):
         # Use debug mode from config
         self.debug = config.MODEL_DEBUG_MODE
     
-    def forward(self, context, distance, diag_before):
+    def forward(self, context, distance, diag_before, entity_category=None):
         batch_size = context.size(0)
+        
+        # Handle the case where entity_category is not provided (backward compatibility)
+        if entity_category is None:
+            # Default to 0 (diagnosis) if not provided
+            entity_category = torch.zeros(batch_size, dtype=torch.long, device=context.device)
         
         # Comment out all layer-by-layer diagnostics to reduce verbosity
         """
@@ -127,19 +138,23 @@ class DiagnosisDateRelationModel(nn.Module):
             print(f"Sample hidden values (first item): {hidden[0, :5]}...")  # First 5 values
         """
         
-        # Concatenate with distance and ordering features
+        # Get entity category embeddings
+        entity_embeddings = self.entity_category_embedding(entity_category)  # [batch_size, entity_embedding_dim]
+        
+        # Concatenate with distance, ordering features, and entity category
         distance = distance.unsqueeze(1)  # [batch_size, 1]
         diag_before = diag_before.unsqueeze(1)  # [batch_size, 1]
-        combined = torch.cat((hidden, distance, diag_before), dim=1)  # [batch_size, hidden_dim*2 + 2]
+        combined = torch.cat((hidden, distance, diag_before, entity_embeddings), dim=1)  # [batch_size, hidden_dim*2 + 2 + entity_embedding_dim]
         
         """
         if self.debug:
-            print(f"After adding distance and diag_before features: {combined.shape}")
+            print(f"After adding distance, diag_before, and entity features: {combined.shape}")
             print(f"Combined feature vector (text + handcrafted features):")
             print(f"  - Text representation: {hidden.shape}")
             # Print only the first item's values for batch processing
             print(f"  - Distance feature (first item): {distance[0].item()}")
             print(f"  - Diag_before feature (first item): {diag_before[0].item()}")
+            print(f"  - Entity category feature (first item): {entity_category[0].item()}")
         """
         
         # Fully connected layers

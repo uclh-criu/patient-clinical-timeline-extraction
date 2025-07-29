@@ -7,16 +7,16 @@ DATA_SOURCE = 'nph'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to use for the relation extraction task.
-# Valid options: 'disorder_only', 'multi_entity'
+# Valid options: 'diagnosis_only', 'multi_entity'
 ENTITY_MODE = "multi_entity"
 
 # --- Execution Settings --- #
 # Controls the extraction method to use for the relation extraction task.
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'bert'
+EXTRACTION_METHOD = 'custom'
 TRAINING_SET_RATIO = 0.8 # The ratio of data to be used for the training set. The rest will be used for the test/inference set.
 DATA_SPLIT_RANDOM_SEED = 42 # A fixed random seed to ensure the train/test split is always the same.
-INFERENCE_SAMPLES = 5 # Limits the number of samples used from the test set. Set to None to use all test samples.
+INFERENCE_SAMPLES = None # Limits the number of samples used from the test set. Set to None to use all test samples.
 
 # --- Data File Paths --- #
 SAMPLE_DATA_PATH = 'data/sample.csv'
@@ -34,7 +34,7 @@ TIMESTAMP_COLUMN = 'document_timestamp'   # Column containing document creation 
 DATES_COLUMN = 'formatted_dates'          # Column containing pre-extracted date entities
 ENTITY_GOLD_COLUMN = 'entity_gold'                  # Gold standard for entities (NER task)
 RELATIONSHIP_GOLD_COLUMN = 'relationship_gold'      # Gold standard for relationships (RE task)
-DIAGNOSES_COLUMN = 'extracted_disorders'            # Used in disorder_only mode
+DIAGNOSES_COLUMN = 'extracted_disorders'            # Used in diagnosis_only mode
 SNOMED_COLUMN = 'extracted_snomed_entities'         # Used in multi_entity mode
 UMLS_COLUMN = 'extracted_umls_entities'             # Used in multi_entity mode
 

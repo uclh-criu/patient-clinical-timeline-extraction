@@ -65,6 +65,10 @@ def train():
     
     print(f"Loading training data from: {training_data_path}")
     
+    # Check if we're in multi-entity mode
+    entity_mode = training_config_custom.ENTITY_MODE
+    print(f"Using entity mode: {entity_mode}")
+    
     # Use the canonical data preparation pipeline with the 'train' data split
     # This will directly load the CSV file and parse all entities and relationships
     print("Loading and preparing data...")
@@ -72,18 +76,35 @@ def train():
     # First, load the training split using load_and_prepare_data
     # This ensures we're using the same split logic as in inference
     import config as main_config
-    if main_config.ENTITY_MODE == 'disorder_only':
-        prepared_train_data, relationship_gold = load_and_prepare_data(
-            training_data_path, None, main_config, data_split_mode='train'
-        )
-    else:
-        prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
-            training_data_path, None, main_config, data_split_mode='train'
-        )
+    
+    # Set the entity mode in the main config to match training_config_custom
+    main_config.ENTITY_MODE = entity_mode
+    
+    try:
+        if entity_mode == 'diagnosis_only':
+            prepared_train_data, relationship_gold = load_and_prepare_data(
+                training_data_path, None, main_config, data_split_mode='train'
+            )
+        else:
+            prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
+                training_data_path, None, main_config, data_split_mode='train'
+            )
+    except ZeroDivisionError:
+        print("Error: ZeroDivisionError occurred during data loading. This is likely due to an empty dataset after splitting.")
+        print("Trying again with data_split_mode='all' to use all available data...")
+        
+        if entity_mode == 'diagnosis_only':
+            prepared_train_data, relationship_gold = load_and_prepare_data(
+                training_data_path, None, main_config, data_split_mode='all'
+            )
+        else:
+            prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
+                training_data_path, None, main_config, data_split_mode='all'
+            )
     
     # Now prepare the training features using the training data
     features, labels, _ = prepare_custom_training_data(
-        training_data_path, training_config_custom.MAX_DISTANCE, None, data_split_mode='train'
+        training_data_path, training_config_custom.MAX_DISTANCE, None, data_split_mode='all'
     )
     print(f"Loaded {len(features)} examples")
     
@@ -110,14 +131,24 @@ def train():
     
     print(f"Train: {len(train_features)}, Validation: {len(val_features)}")
     
+    # Create entity category map for multi-entity mode
+    entity_category_map = {
+        'diagnosis': 0,
+        'symptom': 1,
+        'procedure': 2,
+        'medication': 3
+    }
+    
     # Create datasets using training_config settings
     train_dataset = ClinicalNoteDataset(
         train_features, train_labels, vocab_instance, 
-        training_config_custom.MAX_CONTEXT_LEN, training_config_custom.MAX_DISTANCE
+        training_config_custom.MAX_CONTEXT_LEN, training_config_custom.MAX_DISTANCE,
+        entity_category_map
     ) 
     val_dataset = ClinicalNoteDataset(
         val_features, val_labels, vocab_instance, 
-        training_config_custom.MAX_CONTEXT_LEN, training_config_custom.MAX_DISTANCE
+        training_config_custom.MAX_CONTEXT_LEN, training_config_custom.MAX_DISTANCE,
+        entity_category_map
     )
     
     # Create data loaders using training_config batch size
@@ -149,4 +180,4 @@ def train():
     print("Done!")
 
 if __name__ == "__main__":
-    train() 
+    train()

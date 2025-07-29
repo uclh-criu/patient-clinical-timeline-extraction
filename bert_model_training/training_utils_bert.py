@@ -35,7 +35,7 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
     if not hasattr(config, 'DATES_COLUMN'):
         setattr(config, 'DATES_COLUMN', 'formatted_dates')
     if not hasattr(config, 'ENTITY_MODE'):
-        setattr(config, 'ENTITY_MODE', 'disorder_only')
+        setattr(config, 'ENTITY_MODE', 'diagnosis_only')
     if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):
         setattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION', False)
     
@@ -45,7 +45,7 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
     # Handle different return signatures based on ENTITY_MODE
     result = load_and_prepare_data(csv_path, None, config, data_split_mode=data_split_mode)
     
-    # In disorder_only mode, load_and_prepare_data returns only 2 values
+    # In diagnosis_only mode, load_and_prepare_data returns only 2 values
     # In multi_entity mode, it returns 4 values
     if len(result) == 2:
         prepared_data, relationship_gold = result
@@ -67,7 +67,7 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
     # Create a mapping of gold standard relationships for quick lookup
     gold_relationships = set()
     for rel in relationship_gold:
-        # Handle both disorder_only and multi_entity modes
+        # Handle both diagnosis_only and multi_entity modes
         if 'diagnosis' in rel:
             gold_relationships.add((rel['note_id'], rel['diagnosis'].lower(), rel['date']))
         elif 'entity_label' in rel:

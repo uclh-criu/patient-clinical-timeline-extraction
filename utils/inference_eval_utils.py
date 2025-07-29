@@ -167,7 +167,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
     """
     # Determine if we're in disorder_only mode
     entity_mode = getattr(config, 'ENTITY_MODE', 'multi_entity')
-    disorder_only_mode = (entity_mode == 'disorder_only')
+    disorder_only_mode = (entity_mode == 'disorder_only' or entity_mode == 'diagnosis_only')
     
     # Print diagnostic information
     print(f"\n===== LOAD_AND_PREPARE_DATA =====")
@@ -700,15 +700,15 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
             features.append(feature)
     
     # DIAGNOSTIC: Print combined input and summary statistics
-    if debug_mode:
-        print("\n===== DIAGNOSTIC: PREPROCESS_NOTE_FOR_PREDICTION =====")
-        print(f"Number of diagnoses: {len(diagnoses)}")
-        print(f"Number of dates: {len(dates)}")
-        print(f"Max distance setting: {MAX_DISTANCE} words")
-        print(f"Total diagnosis-date pairs considered: {pairs_considered}")
-        print(f"Pairs within max distance ({MAX_DISTANCE} words): {pairs_within_distance}")
-        print(f"Total features generated: {len(features)}")
-        print("==========================================================\n")
+    #if debug_mode:
+    #    print("\n===== DIAGNOSTIC: PREPROCESS_NOTE_FOR_PREDICTION =====")
+    #    print(f"Number of diagnoses: {len(diagnoses)}")
+    #    print(f"Number of dates: {len(dates)}")
+    #    print(f"Max distance setting: {MAX_DISTANCE} words")
+    #    print(f"Total diagnosis-date pairs considered: {pairs_considered}")
+    #    print(f"Pairs within max distance ({MAX_DISTANCE} words): {pairs_within_distance}")
+    #    print(f"Total features generated: {len(features)}")
+    #    print("==========================================================\n")
     
     return features
 

@@ -62,31 +62,60 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
             setattr(config, 'RELATIONSHIP_GOLD_COLUMN', 'relationship_gold')
         if not hasattr(config, 'DATES_COLUMN'):
             setattr(config, 'DATES_COLUMN', 'formatted_dates')
-        if not hasattr(config, 'ENTITY_MODE'):
-            setattr(config, 'ENTITY_MODE', 'disorder_only')
+        
+        # Check if we have a custom ENTITY_MODE in training_config_custom
+        try:
+            # Try to import training_config_custom
+            import custom_model_training.training_config_custom as training_config_custom
+            if hasattr(training_config_custom, 'ENTITY_MODE'):
+                # Use the ENTITY_MODE from training_config_custom
+                entity_mode = training_config_custom.ENTITY_MODE
+                print(f"Using ENTITY_MODE from training_config_custom: {entity_mode}")
+                setattr(config, 'ENTITY_MODE', entity_mode)
+            else:
+                # If not defined in training_config_custom, use the default or existing value
+                if not hasattr(config, 'ENTITY_MODE'):
+                    setattr(config, 'ENTITY_MODE', 'diagnosis_only')
+        except ImportError:
+            # If training_config_custom can't be imported, use the default or existing value
+            if not hasattr(config, 'ENTITY_MODE'):
+                setattr(config, 'ENTITY_MODE', 'diagnosis_only')
+                
         if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):
             setattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION', False)
             
         # Handle different return signatures based on ENTITY_MODE
-        result = canonical_load(dataset_path_or_data, None, config, data_split_mode=data_split_mode)
-        
-        # In disorder_only mode, load_and_prepare_data returns only 2 values
-        # In multi_entity mode, it returns 4 values
-        if len(result) == 2:
-            prepared_data, relationship_gold = result
-            entity_gold = None
-            pa_likelihood_gold = None
-        else:
-            prepared_data, entity_gold, relationship_gold, pa_likelihood_gold = result
-        
-        if not prepared_data:
-            print("Error: Failed to load data for training.")
+        try:
+            result = canonical_load(dataset_path_or_data, None, config, data_split_mode=data_split_mode)
+            
+            # In disorder_only mode, load_and_prepare_data returns only 2 values
+            # In multi_entity mode, it returns 4 values
+            if len(result) == 2:
+                prepared_data, relationship_gold = result
+                entity_gold = None
+                pa_likelihood_gold = None
+            else:
+                prepared_data, entity_gold, relationship_gold, pa_likelihood_gold = result
+            
+            # Check if prepared_data is empty (which would cause ZeroDivisionError)
+            if not prepared_data:
+                print("Error: No data returned from load_and_prepare_data. This could be due to an empty dataset or an issue with the data split.")
+                print("Please check your dataset and ensure it contains enough records for the requested split.")
+                return [], [], vocab
+                
+        except ZeroDivisionError:
+            print("Error: ZeroDivisionError occurred during data loading. This is likely due to an empty dataset after splitting.")
+            print("Please use a larger dataset or set data_split_mode='all' to use all available data.")
+            return [], [], vocab
+        except Exception as e:
+            print(f"Error loading data: {e}")
             return [], [], vocab
     else:
         # It's already a dataset, process it directly
         print("Processing in-memory dataset")
         prepared_data = []
         relationship_gold = []
+        entity_gold = None
         
         for i, entry in enumerate(dataset_path_or_data):
             clinical_note = entry['clinical_note']
@@ -118,7 +147,7 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
                             'note_id': i,
                             'patient_id': entry.get('patient_id'),
                             'entity_label': rel['entity_label'].lower(),
-                            'entity_category': rel.get('entity_category', 'disorder'),
+                            'entity_category': rel.get('entity_category', 'diagnosis'),
                             'date': rel['date']
                         })
                     elif 'diagnosis' in rel and 'date' in rel:
@@ -127,7 +156,7 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
                             'note_id': i,
                             'patient_id': entry.get('patient_id'),
                             'entity_label': rel['diagnosis'].lower(),
-                            'entity_category': 'disorder',  # Default for legacy format
+                            'entity_category': 'diagnosis',  # Default for legacy format
                             'date': rel['date']
                         })
             
@@ -190,8 +219,15 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
     
     # Create a set of gold standard relationships for quick lookup
     gold_relationships = set()
+    entity_categories = {}  # Map of (entity_label, date) -> entity_category
+    
     for rel in relationship_gold:
-        gold_relationships.add((rel['entity_label'].lower(), rel['date']))
+        entity_label = rel['entity_label'].lower()
+        date = rel['date']
+        gold_relationships.add((entity_label, date))
+        
+        # Store the entity category for each (entity_label, date) pair
+        entity_categories[(entity_label, date)] = rel.get('entity_category', 'diagnosis').lower()
     
     # Print detailed diagnostic information about the data
     print("\n===== DETAILED DATA DIAGNOSTICS =====")
@@ -224,7 +260,8 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
     if gold_relationships:
         print("\nSample gold relationships (first 5):")
         for i, (entity, date) in enumerate(list(gold_relationships)[:5]):
-            print(f"  {i+1}. Entity: '{entity}', Date: '{date}'")
+            category = entity_categories.get((entity, date), 'diagnosis')
+            print(f"  {i+1}. Entity: '{entity}', Category: '{category}', Date: '{date}'")
     else:
         print("\nWARNING: No gold standard relationships found. Check your data format.")
     
@@ -233,6 +270,11 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
     all_labels = []
     total_examples = 0
     total_positive = 0
+    
+    # Determine if we're in multi-entity mode
+    entity_mode = getattr(config, 'ENTITY_MODE', 'diagnosis_only')
+    is_multi_entity = entity_mode == 'multi_entity'
+    print(f"\nUsing entity mode: {entity_mode}")
     
     for note_entry in prepared_data:
         note_text = note_entry['note']
@@ -255,6 +297,12 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
             key = (diagnosis.strip().lower(), parsed_date)
             label = 1 if key in gold_relationships else 0
             
+            # Add entity category information for multi-entity mode
+            if is_multi_entity and key in entity_categories:
+                feature['entity_category'] = entity_categories[key]
+            else:
+                feature['entity_category'] = 'diagnosis'  # Default
+            
             all_features.append(feature)
             all_labels.append(label)
             total_examples += 1
@@ -264,6 +312,17 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
     # Print debug info
     print(f"Generated {total_examples} examples")
     print(f"Positive examples: {total_positive}/{total_examples} ({total_positive/max(1,total_examples)*100:.1f}%)")
+    
+    # Count examples by entity category
+    if is_multi_entity:
+        category_counts = {}
+        for feature in all_features:
+            category = feature.get('entity_category', 'diagnosis')
+            category_counts[category] = category_counts.get(category, 0) + 1
+        
+        print("\nExamples by entity category:")
+        for category, count in category_counts.items():
+            print(f"  {category}: {count} examples ({count/len(all_features)*100:.1f}%)")
     
     return all_features, all_labels, vocab
 
@@ -287,9 +346,14 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
             diag_before = batch['diag_before'].to(device)
             labels = batch['label'].to(device)
             
+            # Handle entity category if available (for multi-entity mode)
+            entity_category = batch.get('entity_category')
+            if entity_category is not None:
+                entity_category = entity_category.to(device)
+            
             # Forward pass
             optimizer.zero_grad()
-            outputs = model(context, distance, diag_before)
+            outputs = model(context, distance, diag_before, entity_category)
             loss = criterion(outputs, labels)
             
             # Backward pass and optimize
@@ -315,8 +379,13 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
                 diag_before = batch['diag_before'].to(device)
                 labels = batch['label'].to(device)
                 
+                # Handle entity category if available (for multi-entity mode)
+                entity_category = batch.get('entity_category')
+                if entity_category is not None:
+                    entity_category = entity_category.to(device)
+                
                 # Forward pass
-                outputs = model(context, distance, diag_before)
+                outputs = model(context, distance, diag_before, entity_category)
                 loss = criterion(outputs, labels)
                 
                 val_loss += loss.item()

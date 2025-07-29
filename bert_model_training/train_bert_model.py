@@ -27,33 +27,36 @@ def main():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     # Get training data path from training_config
-    data_path = os.path.join(project_root, training_config.BERT_TRAINING_DATA_PATH)
-    print(f"Using training data from: {data_path}")
+    training_data_path = os.path.join(project_root, training_config.BERT_TRAINING_DATA_PATH)
+    print(f"Loading training data from: {training_data_path}")
     
     # Ensure the data file exists
-    if not os.path.exists(data_path):
-        print(f"Error: Training data file not found at {data_path}")
+    if not os.path.exists(training_data_path):
+        print(f"Error: Training data file not found at {training_data_path}")
         return
 
     # Ensure model directory exists
     model_path = os.path.join(project_root, config.BERT_MODEL_PATH)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     
-    # First, load the training split using load_and_prepare_data
-    # This ensures we're using the same split logic as in inference
-    print("Loading training split...")
-    if config.ENTITY_MODE == 'disorder_only':
+    # Load training data
+    print(f"Loading training data from: {training_data_path}")
+    
+    # Use the canonical data preparation pipeline with the 'train' data split
+    print("Loading and preparing data...")
+    
+    if config.ENTITY_MODE == 'diagnosis_only':
         prepared_train_data, relationship_gold = load_and_prepare_data(
-            data_path, None, config, data_split_mode='train'
+            training_data_path, None, config, data_split_mode='train'
         )
     else:
         prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
-            data_path, None, config, data_split_mode='train'
+            training_data_path, None, config, data_split_mode='train'
         )
     
     # Prepare data with the 'train' data split
     train_dataset, val_dataset, tokenizer = prepare_bert_training_data(
-        data_path, 
+        training_data_path, 
         training_config.BERT_PRETRAINED_MODEL,
         training_config.BERT_MAX_SEQ_LENGTH,
         data_split_mode='train'

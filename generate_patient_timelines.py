@@ -44,7 +44,7 @@ def create_patient_timelines():
     # This ensures we're working with the same subset of data as inference and evaluation
     try:
         # Load the test split (without actually using the prepared data)
-        if config.ENTITY_MODE == 'disorder_only':
+        if config.ENTITY_MODE == 'diagnosis_only':
             _, _ = load_and_prepare_data(dataset_path, config.INFERENCE_SAMPLES, config, data_split_mode='test')
         else:
             _, _, _, _ = load_and_prepare_data(dataset_path, config.INFERENCE_SAMPLES, config, data_split_mode='test')
