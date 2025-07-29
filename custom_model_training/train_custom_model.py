@@ -5,34 +5,101 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
+import itertools
+import copy
+import time
 
-# Adjust relative paths for imports since train.py is in model_training/
-# Get the parent directory (project root)
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(project_root)
+# Add parent directory to path to allow importing from models
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import from our modules using adjusted paths
-# Files within the same directory (model_training)
-from DiagnosisDateRelationModel import DiagnosisDateRelationModel 
-from custom_model_training.Vocabulary import Vocabulary
-from custom_model_training.ClinicalNoteDataset import ClinicalNoteDataset
-import custom_model_training.training_config_custom as training_config_custom 
-
-# Files from other top-level directories
-from custom_model_training.training_utils_custom import prepare_custom_training_data
-from custom_model_training.training_utils_custom import train_model, plot_training_curves
 from config import DEVICE, MODEL_PATH, VOCAB_PATH, TRAINING_SET_RATIO, DATA_SPLIT_RANDOM_SEED
 from utils.inference_eval_utils import load_and_prepare_data
 import config as main_config
+import custom_model_training.training_config_custom as training_config_custom
+from custom_model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
+from custom_model_training.ClinicalNoteDataset import ClinicalNoteDataset
+from custom_model_training.training_utils_custom import prepare_custom_training_data, train_model, plot_training_curves, log_training_run
 
-def train():
-    print(f"Using device: {DEVICE}")
+# Get the project root directory
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def generate_hyperparameter_grid():
+    """
+    Generate a grid of hyperparameters for grid search.
     
-    # Get entity mode from training config
-    entity_mode = training_config_custom.ENTITY_MODE
+    Returns:
+        list: List of dictionaries, each containing a unique combination of hyperparameters
+    """
+    # If grid search is disabled, return a single configuration with the first value of each list
+    if not getattr(training_config_custom, 'ENABLE_GRID_SEARCH', True):
+        config = {}
+        for key, value in vars(training_config_custom).items():
+            if key.startswith('__'):
+                continue
+            if isinstance(value, list):
+                config[key] = value[0]  # Take the first value
+            else:
+                config[key] = value
+        return [config]
+    
+    # Identify hyperparameters that are lists
+    param_grid = {}
+    for key, value in vars(training_config_custom).items():
+        if key.startswith('__'):
+            continue
+        if isinstance(value, list) and len(value) > 0:
+            param_grid[key] = value
+    
+    # If no lists are found, return the original config
+    if not param_grid:
+        return [vars(training_config_custom)]
+    
+    # Generate all combinations of hyperparameters
+    keys = param_grid.keys()
+    values = param_grid.values()
+    combinations = list(itertools.product(*values))
+    
+    # Create a list of dictionaries with all combinations
+    grid = []
+    for combo in combinations:
+        config = {}
+        # Copy all parameters from training_config_custom
+        for key, value in vars(training_config_custom).items():
+            if key.startswith('__'):
+                continue
+            config[key] = value
+        
+        # Override with the current combination
+        for i, key in enumerate(keys):
+            config[key] = combo[i]
+        
+        grid.append(config)
+    
+    return grid
+
+def train_with_config(config):
+    """
+    Train a model with the given hyperparameter configuration.
+    
+    Args:
+        config (dict): Dictionary of hyperparameters
+        
+    Returns:
+        tuple: (best_val_acc, model_path, metrics)
+    """
+    print(f"\n{'='*80}")
+    print(f"Training with configuration:")
+    # Print only the hyperparameters that are being tuned (those that are lists in the original config)
+    for key, value in config.items():
+        if isinstance(getattr(training_config_custom, key, None), list):
+            print(f"  {key}: {value}")
+    print(f"{'='*80}\n")
+    
+    # Get entity mode from config
+    entity_mode = config['ENTITY_MODE']
     
     # Get dataset name from training data path
-    dataset_path = training_config_custom.TRAINING_DATA_PATH
+    dataset_path = config['TRAINING_DATA_PATH']
     dataset_name = os.path.basename(dataset_path)
     
     # Create model name based on dataset and entity mode
@@ -51,7 +118,7 @@ def train():
     if not os.path.exists(vocab_full_path):
         print(f"Error: Vocabulary file not found at {vocab_full_path}")
         print("Please run build_vocab.py first to create the vocabulary.")
-        sys.exit(1)
+        return 0, None, None
     
     # Load the pre-built vocabulary
     print(f"Loading vocabulary from: {vocab_full_path}")
@@ -67,14 +134,14 @@ def train():
         print(f"Vocabulary loaded successfully. Size: {vocab_instance.n_words} words")
     except Exception as e:
         print(f"Error loading vocabulary: {e}")
-        sys.exit(1)
+        return 0, None, None
     
     # Step 1: Load training data from the path specified in training_config
-    training_data_path = os.path.join(project_root, training_config_custom.TRAINING_DATA_PATH)
+    training_data_path = os.path.join(project_root, config['TRAINING_DATA_PATH'])
     
     if not os.path.exists(training_data_path):
         print(f"Error: Training data file not found at {training_data_path}")
-        sys.exit(1)
+        return 0, None, None
     
     print(f"Loading training data from: {training_data_path}")
     
@@ -82,10 +149,9 @@ def train():
     print(f"Using entity mode: {entity_mode}")
     
     # Use the canonical data preparation pipeline with the 'train' data split
-    # This will directly load the CSV file and parse all entities and relationships
     print("Loading and preparing data...")
     
-    # Set the entity mode in the main config to match training_config_custom
+    # Set the entity mode in the main config to match the current config
     main_config.ENTITY_MODE = entity_mode
     
     try:
@@ -112,7 +178,7 @@ def train():
     
     # Now prepare the training features using the training data
     features, labels, _ = prepare_custom_training_data(
-        training_data_path, training_config_custom.MAX_DISTANCE, None, data_split_mode='all'
+        training_data_path, config['MAX_DISTANCE'], None, data_split_mode='all'
     )
     print(f"Loaded {len(features)} examples")
     
@@ -126,11 +192,11 @@ def train():
         if positive == 0:
             print("ERROR: No positive examples found. The model will not learn anything useful.")
             print("Please check your data format and ensure that relationship_gold contains valid relationships.")
-            sys.exit(1)
+            return 0, None, None
     else:
         print("ERROR: No examples found in the dataset!")
         print("Please check your data format and ensure that extracted_disorders and formatted_dates are correctly parsed.")
-        sys.exit(1)
+        return 0, None, None
     
     # Step 3: Create train / val / test datasets 
     train_features, val_features, train_labels, val_labels = train_test_split(
@@ -147,38 +213,38 @@ def train():
         'medication': 3
     }
     
-    # Create datasets using training_config settings
+    # Create datasets using config settings
     train_dataset = ClinicalNoteDataset(
         train_features, train_labels, vocab_instance, 
-        training_config_custom.MAX_CONTEXT_LEN, training_config_custom.MAX_DISTANCE,
+        config['MAX_CONTEXT_LEN'], config['MAX_DISTANCE'],
         entity_category_map
     ) 
     val_dataset = ClinicalNoteDataset(
         val_features, val_labels, vocab_instance, 
-        training_config_custom.MAX_CONTEXT_LEN, training_config_custom.MAX_DISTANCE,
+        config['MAX_CONTEXT_LEN'], config['MAX_DISTANCE'],
         entity_category_map
     )
     
-    # Create data loaders using training_config batch size
-    train_loader = DataLoader(train_dataset, batch_size=training_config_custom.BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=training_config_custom.BATCH_SIZE)
+    # Create data loaders using config batch size
+    train_loader = DataLoader(train_dataset, batch_size=config['BATCH_SIZE'], shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=config['BATCH_SIZE'])
     
-    # Step 4: Initialize and train model using training_config settings
+    # Step 4: Initialize and train model using config settings
     model = DiagnosisDateRelationModel(
         vocab_size=vocab_instance.n_words, 
-        embedding_dim=training_config_custom.EMBEDDING_DIM,
-        hidden_dim=training_config_custom.HIDDEN_DIM
+        embedding_dim=config['EMBEDDING_DIM'],
+        hidden_dim=config['HIDDEN_DIM']
     ).to(DEVICE)
     
-    # Loss function and optimizer using training_config learning rate
+    # Loss function and optimizer using config learning rate
     criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=training_config_custom.LEARNING_RATE)
+    optimizer = optim.Adam(model.parameters(), lr=config['LEARNING_RATE'])
     
-    # Train model using training_config epochs
+    # Train model using config epochs
     print("Training model...")
     metrics = train_model(
         model, train_loader, val_loader, optimizer, criterion, 
-        training_config_custom.NUM_EPOCHS, DEVICE, model_full_path
+        config['NUM_EPOCHS'], DEVICE, model_full_path
     )
     
     # Plot training curves
@@ -188,25 +254,66 @@ def train():
     # Collect hyperparameters for logging
     hyperparams = {
         'ENTITY_MODE': entity_mode,
-        'MAX_DISTANCE': training_config_custom.MAX_DISTANCE,
-        'MAX_CONTEXT_LEN': training_config_custom.MAX_CONTEXT_LEN,
-        'EMBEDDING_DIM': training_config_custom.EMBEDDING_DIM,
-        'HIDDEN_DIM': training_config_custom.HIDDEN_DIM,
-        'BATCH_SIZE': training_config_custom.BATCH_SIZE,
-        'LEARNING_RATE': training_config_custom.LEARNING_RATE,
-        'NUM_EPOCHS': training_config_custom.NUM_EPOCHS,
-        'DROPOUT': training_config_custom.DROPOUT,
-        'USE_DISTANCE_FEATURE': training_config_custom.USE_DISTANCE_FEATURE,
-        'USE_POSITION_FEATURE': training_config_custom.USE_POSITION_FEATURE,
-        'ENTITY_CATEGORY_EMBEDDING_DIM': training_config_custom.ENTITY_CATEGORY_EMBEDDING_DIM,
+        'MAX_DISTANCE': config['MAX_DISTANCE'],
+        'MAX_CONTEXT_LEN': config['MAX_CONTEXT_LEN'],
+        'EMBEDDING_DIM': config['EMBEDDING_DIM'],
+        'HIDDEN_DIM': config['HIDDEN_DIM'],
+        'BATCH_SIZE': config['BATCH_SIZE'],
+        'LEARNING_RATE': config['LEARNING_RATE'],
+        'NUM_EPOCHS': config['NUM_EPOCHS'],
+        'DROPOUT': config['DROPOUT'],
+        'USE_DISTANCE_FEATURE': config['USE_DISTANCE_FEATURE'],
+        'USE_POSITION_FEATURE': config['USE_POSITION_FEATURE'],
+        'ENTITY_CATEGORY_EMBEDDING_DIM': config['ENTITY_CATEGORY_EMBEDDING_DIM'],
         'train_examples': len(train_features),
         'val_examples': len(val_features),
         'positive_examples_pct': positive/len(labels)*100
     }
     
     # Log the training run
-    from custom_model_training.training_utils_custom import log_training_run
     log_training_run(model_full_path, hyperparams, metrics, dataset_name, entity_mode)
+    
+    return metrics['best_val_acc'], model_full_path, metrics
+
+def train():
+    print(f"Using device: {DEVICE}")
+    
+    # Generate hyperparameter grid
+    print("Generating hyperparameter grid for training...")
+    hyperparameter_grid = generate_hyperparameter_grid()
+    print(f"Generated {len(hyperparameter_grid)} hyperparameter combinations for grid search.")
+    
+    # Track the best model across all runs
+    best_val_acc = 0
+    best_model_path = None
+    best_config = None
+    best_metrics = None
+    
+    # Train with each hyperparameter combination
+    start_time = time.time()
+    for i, config in enumerate(hyperparameter_grid):
+        print(f"\nTraining run {i+1}/{len(hyperparameter_grid)}")
+        val_acc, model_path, metrics = train_with_config(config)
+        
+        # Update best model if this run is better
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_path = model_path
+            best_config = config
+            best_metrics = metrics
+            print(f"\n*** New best model found with validation accuracy: {best_val_acc:.2f}% ***")
+    
+    # Print summary of grid search
+    elapsed_time = time.time() - start_time
+    print(f"\n{'='*80}")
+    print(f"Grid search completed in {elapsed_time:.2f} seconds.")
+    print(f"Best validation accuracy: {best_val_acc:.2f}%")
+    print(f"Best model saved to: {best_model_path}")
+    print(f"Best hyperparameters:")
+    for key, value in best_config.items():
+        if isinstance(getattr(training_config_custom, key, None), list):
+            print(f"  {key}: {value}")
+    print(f"{'='*80}")
     
     print("Done!")
 
