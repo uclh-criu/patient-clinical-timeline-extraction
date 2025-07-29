@@ -35,7 +35,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         labels_info: Dictionary with label statistics
         
     Returns:
-        tuple: (best_val_acc, model_path, metrics)
+        tuple: (best_val_acc, best_model_state, metrics, model_name)
     """
     print(f"\n{'='*80}")
     print(f"Training with configuration:")
@@ -55,14 +55,6 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
     # Create model name based on dataset and entity mode
     model_name = f"custom_{os.path.splitext(dataset_name)[0]}_{entity_mode}.pt"
     
-    # Ensure the training directory exists for outputs
-    output_dir = os.path.join(project_root, os.path.dirname(MODEL_PATH))
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    # Set the full path for the model
-    model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), model_name)
-    
     # Create data loaders using config batch size
     train_loader = DataLoader(train_dataset, batch_size=config['BATCH_SIZE'], shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=config['BATCH_SIZE'])
@@ -80,12 +72,15 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
     
     # Train model using config epochs
     print("Training model...")
-    metrics = train_model(
+    best_model_state, metrics = train_model(
         model, train_loader, val_loader, optimizer, criterion, 
-        config['NUM_EPOCHS'], DEVICE, model_full_path
+        config['NUM_EPOCHS'], DEVICE
     )
     
     # Plot training curves
+    output_dir = os.path.join(project_root, os.path.dirname(MODEL_PATH))
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     plot_save_path = os.path.join(output_dir, f"{os.path.splitext(model_name)[0]}_training_curves")
     plot_training_curves(metrics, plot_save_path)
     
@@ -109,6 +104,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
     }
     
     # Log the training run
+    model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), model_name)
     log_training_run(
         model_full_path, 
         hyperparams, 
@@ -119,7 +115,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         'custom_model_training_log.csv'
     )
     
-    return metrics['best_val_acc'], model_full_path, metrics
+    return metrics['best_val_acc'], best_model_state, metrics, model_name
 
 def train():
     print(f"Using device: {DEVICE}")
@@ -256,24 +252,26 @@ def train():
     
     # Track the best model across all runs
     best_val_acc = 0
-    best_model_path = None
+    best_model_state = None
     best_config = None
     best_metrics = None
+    best_model_name = None
     
     # Train with each hyperparameter combination
     start_time = time.time()
     for i, config in enumerate(hyperparameter_grid):
         print(f"\nTraining run {i+1}/{len(hyperparameter_grid)}")
-        val_acc, model_path, metrics = train_with_config(
+        val_acc, model_state, metrics, model_name = train_with_config(
             config, train_dataset, val_dataset, train_features, val_features, labels_info
         )
         
         # Update best model if this run is better
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            best_model_path = model_path
+            best_model_state = model_state
             best_config = config
             best_metrics = metrics
+            best_model_name = model_name
             print(f"\n*** New best model found with validation accuracy: {best_val_acc:.2f}% ***")
     
     # Print summary of grid search
@@ -281,7 +279,15 @@ def train():
     print(f"\n{'='*80}")
     print(f"Grid search completed in {elapsed_time:.2f} seconds.")
     print(f"Best validation accuracy: {best_val_acc:.2f}%")
-    print(f"Best model saved to: {best_model_path}")
+    
+    # Save the best model once at the end of the grid search
+    if best_model_state is not None:
+        model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), best_model_name)
+        # Ensure directory exists before saving
+        os.makedirs(os.path.dirname(model_full_path), exist_ok=True)
+        torch.save(best_model_state, model_full_path)
+        print(f"Best model saved to: {model_full_path}")
+    
     print(f"Best hyperparameters:")
     for key, value in best_config.items():
         if isinstance(getattr(training_config_custom, key, None), list):

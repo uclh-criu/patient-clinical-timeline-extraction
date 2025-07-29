@@ -307,9 +307,9 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
     return all_features, all_labels, vocab
 
 # Training function
-def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, device, model_save_path):
+def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, device, model_save_path=None):
     """
-    Train the model and save the best version based on validation accuracy.
+    Train the model and track the best version based on validation accuracy.
     
     Args:
         model: The PyTorch model to train
@@ -319,16 +319,16 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
         criterion: The loss function
         epochs: Number of epochs to train for
         device: Device to train on (cpu or cuda)
-        model_save_path: Path to save the best model
+        model_save_path: Path to save the best model (not used anymore, kept for compatibility)
         
     Returns:
-        dict: Dictionary containing training metrics
+        tuple: (best_model_state, metrics) - The state dict of the best model and metrics dictionary
     """
-    # model_save_path should be the full path from config
     train_losses = []
     val_losses = []
     val_accs = []
     best_val_acc = 0
+    best_model_state = None  # Store the best model state in memory
     
     for epoch in range(epochs):
         # Training
@@ -397,13 +397,11 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
         val_acc = 100 * correct / total
         val_accs.append(val_acc)
         
-        # Save the best model to the specified path
+        # Store the best model state in memory
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            # Ensure directory exists before saving
-            os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
-            torch.save(model.state_dict(), model_save_path)
-            print(f"New best model saved with validation accuracy: {val_acc:.2f}%")
+            best_model_state = model.state_dict().copy()  # Create a copy of the state dict
+            print(f"New best validation accuracy found: {val_acc:.2f}%")
         
         print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
     
@@ -422,4 +420,4 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
         'val_acc': val_accs[-1]          # For consistency with log_training_run
     }
     
-    return metrics
+    return best_model_state, metrics
