@@ -11,7 +11,7 @@ from custom_model_training.training_config_custom import ENTITY_CATEGORY_EMBEDDI
 
 # Model architecture
 class DiagnosisDateRelationModel(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, apply_sigmoid=True):
         super(DiagnosisDateRelationModel, self).__init__()
         
         # Word embeddings
@@ -38,6 +38,10 @@ class DiagnosisDateRelationModel(nn.Module):
         
         # Dropout for regularization
         self.dropout = nn.Dropout(0.3)
+        
+        # Flag to control whether to apply sigmoid activation
+        # Set to True for BCELoss, False for BCEWithLogitsLoss
+        self.apply_sigmoid = apply_sigmoid
         
         # Use debug mode from config
         self.debug = config.MODEL_DEBUG_MODE
@@ -168,8 +172,8 @@ class DiagnosisDateRelationModel(nn.Module):
         output = self.dropout(output)
         output = self.fc2(output)
         
-        # Sigmoid for binary classification and squeeze dimension 1 to match labels shape
-        final_output = torch.sigmoid(output).squeeze(1)
+        # Apply sigmoid for BCELoss or return raw logits for BCEWithLogitsLoss
+        final_output = torch.sigmoid(output).squeeze(1) if self.apply_sigmoid else output.squeeze(1)
         
         """
         if self.debug:

@@ -23,6 +23,17 @@ DROPOUT = 0.3  # Dropout rate for regularization
 USE_DISTANCE_FEATURE = True  # Whether to use distance between diagnosis and date as a feature
 USE_POSITION_FEATURE = True  # Whether to use relative position (diagnosis before date) as a feature
 
+# --- Loss Function Configuration --- #
+# Whether to use weighted loss to address class imbalance
+USE_WEIGHTED_LOSS = True
+
+# Positive class weight for weighted BCE loss
+# Formula: POS_WEIGHT = num_negative_samples / num_positive_samples
+# Example: If dataset has 4231 negative examples and 313 positive examples,
+# POS_WEIGHT = 4231/313 ≈ 13.5, meaning positive examples are weighted 13.5x more than negative examples
+# Set to None to calculate automatically from training data, or provide a specific value
+POS_WEIGHT = None  # None = auto-calculate, or set a specific value (e.g., 13.5)
+
 # --- Grid Search Configuration --- #
 # Set ENABLE_GRID_SEARCH to False to use only the first value in each list
 # When True, all combinations of hyperparameters will be tested

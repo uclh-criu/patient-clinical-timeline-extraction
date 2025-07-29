@@ -60,14 +60,39 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
     val_loader = DataLoader(val_dataset, batch_size=config['BATCH_SIZE'])
     
     # Step 4: Initialize and train model using config settings
+    # Check if weighted loss should be used
+    use_weighted_loss = config.get('USE_WEIGHTED_LOSS', False)
+    if use_weighted_loss:
+        # Calculate or use provided positive weight
+        pos_weight = config.get('POS_WEIGHT', None)
+        if pos_weight is None and 'positive' in labels_info and 'negative' in labels_info:
+            # Auto-calculate from data
+            pos_weight = labels_info['negative'] / max(1, labels_info['positive'])
+            print(f"Auto-calculated positive weight: {pos_weight:.2f}")
+        
+        if pos_weight is not None:
+            # Convert to tensor and use weighted BCE loss
+            pos_weight_tensor = torch.tensor([pos_weight]).to(DEVICE)
+            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+            print(f"Using weighted BCE loss with positive weight: {pos_weight:.2f}")
+        else:
+            # Fall back to standard BCE loss if weight cannot be determined
+            criterion = nn.BCELoss()
+            print("Using standard BCE loss (could not determine positive weight)")
+            use_weighted_loss = False
+    else:
+        # Use standard BCE loss
+        criterion = nn.BCELoss()
+        print("Using standard BCE loss")
+    
+    # Initialize model with apply_sigmoid=False when using BCEWithLogitsLoss
     model = DiagnosisDateRelationModel(
         vocab_size=train_dataset.vocab.n_words, 
         embedding_dim=config['EMBEDDING_DIM'],
-        hidden_dim=config['HIDDEN_DIM']
+        hidden_dim=config['HIDDEN_DIM'],
+        apply_sigmoid=not use_weighted_loss  # False when using weighted loss (BCEWithLogitsLoss)
     ).to(DEVICE)
     
-    # Loss function and optimizer using config learning rate
-    criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=config['LEARNING_RATE'])
     
     # Train model using config epochs
@@ -98,6 +123,8 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         'USE_DISTANCE_FEATURE': config['USE_DISTANCE_FEATURE'],
         'USE_POSITION_FEATURE': config['USE_POSITION_FEATURE'],
         'ENTITY_CATEGORY_EMBEDDING_DIM': config['ENTITY_CATEGORY_EMBEDDING_DIM'],
+        'USE_WEIGHTED_LOSS': config.get('USE_WEIGHTED_LOSS', False),
+        'POS_WEIGHT': pos_weight if config.get('USE_WEIGHTED_LOSS', False) else None,
         'train_examples': len(train_features),
         'val_examples': len(val_features),
         'positive_examples_pct': labels_info['positive_pct']
