@@ -18,3 +18,10 @@ sample.csv
 template.csv
 synthetic_results_final.csv
 model.safetensors
+
+# Ignore all PyTorch model files
+*.pt
+# Ignore all training curve images
+*training_curves.png
+# Ignore all training log files
+*_log.csv

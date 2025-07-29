@@ -5,8 +5,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
-import itertools
-import copy
 import time
 
 # Add parent directory to path to allow importing from models
@@ -14,68 +12,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import DEVICE, MODEL_PATH, VOCAB_PATH, TRAINING_SET_RATIO, DATA_SPLIT_RANDOM_SEED
 from utils.inference_eval_utils import load_and_prepare_data
+from utils.training_utils import generate_hyperparameter_grid, log_training_run, plot_training_curves
 import config as main_config
 import custom_model_training.training_config_custom as training_config_custom
 from custom_model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
 from custom_model_training.ClinicalNoteDataset import ClinicalNoteDataset
-from custom_model_training.training_utils_custom import prepare_custom_training_data, train_model, plot_training_curves, log_training_run
+from custom_model_training.training_utils_custom import prepare_custom_training_data, train_model
 
 # Get the project root directory
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-def generate_hyperparameter_grid():
-    """
-    Generate a grid of hyperparameters for grid search.
-    
-    Returns:
-        list: List of dictionaries, each containing a unique combination of hyperparameters
-    """
-    # If grid search is disabled, return a single configuration with the first value of each list
-    if not getattr(training_config_custom, 'ENABLE_GRID_SEARCH', True):
-        config = {}
-        for key, value in vars(training_config_custom).items():
-            if key.startswith('__'):
-                continue
-            if isinstance(value, list):
-                config[key] = value[0]  # Take the first value
-            else:
-                config[key] = value
-        return [config]
-    
-    # Identify hyperparameters that are lists
-    param_grid = {}
-    for key, value in vars(training_config_custom).items():
-        if key.startswith('__'):
-            continue
-        if isinstance(value, list) and len(value) > 0:
-            param_grid[key] = value
-    
-    # If no lists are found, return the original config
-    if not param_grid:
-        return [vars(training_config_custom)]
-    
-    # Generate all combinations of hyperparameters
-    keys = param_grid.keys()
-    values = param_grid.values()
-    combinations = list(itertools.product(*values))
-    
-    # Create a list of dictionaries with all combinations
-    grid = []
-    for combo in combinations:
-        config = {}
-        # Copy all parameters from training_config_custom
-        for key, value in vars(training_config_custom).items():
-            if key.startswith('__'):
-                continue
-            config[key] = value
-        
-        # Override with the current combination
-        for i, key in enumerate(keys):
-            config[key] = combo[i]
-        
-        grid.append(config)
-    
-    return grid
 
 def train_with_config(config):
     """
@@ -271,7 +216,15 @@ def train_with_config(config):
     }
     
     # Log the training run
-    log_training_run(model_full_path, hyperparams, metrics, dataset_name, entity_mode)
+    log_training_run(
+        model_full_path, 
+        hyperparams, 
+        metrics, 
+        dataset_name, 
+        entity_mode,
+        os.path.join(project_root, 'custom_model_training'),
+        'custom_model_training_log.csv'
+    )
     
     return metrics['best_val_acc'], model_full_path, metrics
 
@@ -280,7 +233,7 @@ def train():
     
     # Generate hyperparameter grid
     print("Generating hyperparameter grid for training...")
-    hyperparameter_grid = generate_hyperparameter_grid()
+    hyperparameter_grid = generate_hyperparameter_grid(training_config_custom)
     print(f"Generated {len(hyperparameter_grid)} hyperparameter combinations for grid search.")
     
     # Track the best model across all runs

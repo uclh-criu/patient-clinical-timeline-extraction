@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 class BertEntityPairDataset(Dataset):
     """
     Dataset for BERT entity pair classification.
-    Each example is a pair of entities (disorder and date) with a binary label
+    Each example is a pair of entities (entity and date) with a binary label
     indicating whether they are related.
     """
     
@@ -17,12 +17,21 @@ class BertEntityPairDataset(Dataset):
             examples (list): List of dictionaries containing:
                 - text (str): The text with special tokens marking entities
                 - label (int): 1 if the entities are related, 0 otherwise
+                - entity_category (str, optional): Category of the entity (diagnosis, symptom, etc.)
             tokenizer: The BERT tokenizer
             max_length (int): Maximum sequence length
         """
         self.examples = examples
         self.tokenizer = tokenizer
         self.max_length = max_length
+        
+        # Entity category mapping
+        self.entity_category_map = {
+            'diagnosis': 0,
+            'symptom': 1,
+            'procedure': 2,
+            'medication': 3
+        }
     
     def __len__(self):
         return len(self.examples)
@@ -35,11 +44,15 @@ class BertEntityPairDataset(Dataset):
             idx (int): Index of the example
             
         Returns:
-            dict: Dictionary containing the tokenized input and label
+            dict: Dictionary containing the tokenized input, label, and entity category
         """
         example = self.examples[idx]
         text = example['text']
         label = example['label']
+        
+        # Get entity category if available (default to 'diagnosis' if not)
+        entity_category = example.get('entity_category', 'diagnosis')
+        entity_category_id = self.entity_category_map.get(entity_category, 0)  # Default to diagnosis (0)
         
         # Tokenize the text with special tokens
         encoding = self.tokenizer(
@@ -53,8 +66,9 @@ class BertEntityPairDataset(Dataset):
         # Remove the batch dimension added by the tokenizer
         encoding = {k: v.squeeze(0) for k, v in encoding.items()}
         
-        # Add the label
+        # Add the label and entity category
         encoding['label'] = torch.tensor(label, dtype=torch.float)
+        encoding['entity_category'] = torch.tensor(entity_category_id, dtype=torch.long)
         
         return encoding
     
@@ -66,7 +80,7 @@ class BertEntityPairDataset(Dataset):
         Args:
             entity_pairs (list): List of dictionaries containing:
                 - text (str): The original text
-                - entity1 (dict): First entity with 'text', 'start', 'end'
+                - entity1 (dict): First entity with 'text', 'start', 'end', and optional 'category'
                 - entity2 (dict): Second entity with 'text', 'start', 'end'
                 - label (int): 1 if the entities are related, 0 otherwise
             tokenizer: The BERT tokenizer
@@ -82,6 +96,9 @@ class BertEntityPairDataset(Dataset):
             entity1 = pair['entity1']
             entity2 = pair['entity2']
             label = pair['label']
+            
+            # Get entity category if available
+            entity_category = entity1.get('category', 'diagnosis').lower()
             
             # Insert special tokens to mark the entities
             # We need to handle the case where entity1 comes before entity2 or vice versa
@@ -106,7 +123,8 @@ class BertEntityPairDataset(Dataset):
             
             examples.append({
                 'text': marked_text,
-                'label': label
+                'label': label,
+                'entity_category': entity_category
             })
         
         return cls(examples, tokenizer, max_length) 

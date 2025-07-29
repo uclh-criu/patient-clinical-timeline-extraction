@@ -3,6 +3,7 @@ import os
 import torch
 from transformers import AutoTokenizer
 import config # Import the config module
+import bert_model_training.training_config_bert as training_config_bert
 
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,23 +35,40 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
         setattr(config, 'RELATIONSHIP_GOLD_COLUMN', 'relationship_gold')
     if not hasattr(config, 'DATES_COLUMN'):
         setattr(config, 'DATES_COLUMN', 'formatted_dates')
-    if not hasattr(config, 'ENTITY_MODE'):
-        setattr(config, 'ENTITY_MODE', 'diagnosis_only')
+    
+    # Set entity mode from training_config_bert
+    entity_mode = training_config_bert.ENTITY_MODE
+    setattr(config, 'ENTITY_MODE', entity_mode)
+    
     if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):
         setattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION', False)
     
     # Load the data using the canonical function with the specified data split mode
     print(f"Loading data with split mode: {data_split_mode}")
+    print(f"Using entity mode: {entity_mode}")
     
-    # Handle different return signatures based on ENTITY_MODE
-    result = load_and_prepare_data(csv_path, None, config, data_split_mode=data_split_mode)
-    
-    # In diagnosis_only mode, load_and_prepare_data returns only 2 values
-    # In multi_entity mode, it returns 4 values
-    if len(result) == 2:
-        prepared_data, relationship_gold = result
-    else:
-        prepared_data, _, relationship_gold, _ = result
+    try:
+        # Handle different return signatures based on ENTITY_MODE
+        if entity_mode == 'diagnosis_only':
+            prepared_data, relationship_gold = load_and_prepare_data(
+                csv_path, None, config, data_split_mode=data_split_mode
+            )
+        else:
+            prepared_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
+                csv_path, None, config, data_split_mode=data_split_mode
+            )
+    except ZeroDivisionError:
+        print("Error: ZeroDivisionError occurred during data loading. This is likely due to an empty dataset after splitting.")
+        print("Trying again with data_split_mode='all' to use all available data...")
+        
+        if entity_mode == 'diagnosis_only':
+            prepared_data, relationship_gold = load_and_prepare_data(
+                csv_path, None, config, data_split_mode='all'
+            )
+        else:
+            prepared_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
+                csv_path, None, config, data_split_mode='all'
+            )
     
     if not prepared_data:
         print("Error: Failed to load data for BERT training.")
@@ -65,18 +83,30 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
     tokenizer.add_special_tokens(special_tokens)
     
     # Create a mapping of gold standard relationships for quick lookup
-    gold_relationships = set()
+    gold_relationships = {}  # (note_id, entity_label, date) -> entity_category
+    
     for rel in relationship_gold:
         # Handle both diagnosis_only and multi_entity modes
         if 'diagnosis' in rel:
-            gold_relationships.add((rel['note_id'], rel['diagnosis'].lower(), rel['date']))
+            key = (rel['note_id'], rel['diagnosis'].lower(), rel['date'])
+            gold_relationships[key] = 'diagnosis'
         elif 'entity_label' in rel:
-            gold_relationships.add((rel['note_id'], rel['entity_label'].lower(), rel['date']))
+            key = (rel['note_id'], rel['entity_label'].lower(), rel['date'])
+            gold_relationships[key] = rel.get('entity_category', 'diagnosis').lower()
     
     print(f"Found {len(gold_relationships)} gold standard relationships")
     
     # Create entity pairs for BERT training
     entity_pairs = []
+    
+    # Track entity categories for statistics
+    entity_category_counts = {
+        'diagnosis': 0,
+        'symptom': 0,
+        'procedure': 0,
+        'medication': 0,
+        'unknown': 0
+    }
     
     for note_entry in prepared_data:
         note_id = note_entry['note_id']
@@ -94,12 +124,12 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
                 entity_label = entity.get('label', '')
                 entity_start = entity.get('start', 0)
                 entity_end = entity.get('end', entity_start + len(entity_label))
-                entity_category = entity.get('category', 'disorder')
+                entity_category = entity.get('category', 'diagnosis').lower()
             else:
                 # Legacy format: (label, position)
                 entity_label, entity_start = entity
                 entity_end = entity_start + len(entity_label)
-                entity_category = 'disorder'  # Default category for legacy format
+                entity_category = 'diagnosis'  # Default category for legacy format
             
             for date_tuple in dates:
                 # Unpack the date tuple: (parsed_date, raw_date_str, position)
@@ -123,8 +153,19 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
                 
                 # Check if this is a gold standard relationship
                 is_gold = False
-                if (note_id, entity_label.lower(), parsed_date) in gold_relationships:
+                key = (note_id, entity_label.lower(), parsed_date)
+                
+                if key in gold_relationships:
                     is_gold = True
+                    # Use the category from gold standard if available
+                    entity_category = gold_relationships[key]
+                
+                # Update category counts
+                if is_gold:
+                    if entity_category in entity_category_counts:
+                        entity_category_counts[entity_category] += 1
+                    else:
+                        entity_category_counts['unknown'] += 1
                 
                 # Add to entity pairs
                 entity_pairs.append({
@@ -139,8 +180,14 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
     # Check class balance
     positive = sum(1 for pair in entity_pairs if pair['label'] == 1)
     negative = len(entity_pairs) - positive
-    print(f"Class distribution: {positive} positive examples ({positive/len(entity_pairs)*100:.1f}%), "
-          f"{negative} negative examples ({negative/len(entity_pairs)*100:.1f}%)")
+    print(f"Class distribution: {positive} positive examples ({positive/len(entity_pairs)*100:.1f}%), {negative} negative examples ({negative/len(entity_pairs)*100:.1f}%)")
+    
+    # Print entity category distribution for positive examples
+    if entity_mode == 'multi_entity':
+        print("Entity category distribution for positive examples:")
+        for category, count in entity_category_counts.items():
+            if count > 0:
+                print(f"  {category}: {count} examples ({count/positive*100:.1f}%)")
     
     # Balance the dataset if needed (downsample negative examples)
     if negative > 5 * positive:  # If negative examples are more than 5x positive ones
@@ -149,164 +196,226 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
         positive_pairs = [pair for pair in entity_pairs if pair['label'] == 1]
         negative_pairs = [pair for pair in entity_pairs if pair['label'] == 0]
         
-        # Keep all positive examples and randomly sample negative examples
-        sampled_negative = random.sample(negative_pairs, min(len(negative_pairs), 5 * len(positive_pairs)))
-        entity_pairs = positive_pairs + sampled_negative
+        # Randomly select a subset of negative examples (5x the number of positive examples)
+        random.seed(42)  # For reproducibility
+        sampled_negative_pairs = random.sample(negative_pairs, min(5 * len(positive_pairs), len(negative_pairs)))
         
-        # Shuffle the pairs
-        random.shuffle(entity_pairs)
-        
-        # Print new class balance
-        positive = sum(1 for pair in entity_pairs if pair['label'] == 1)
-        negative = len(entity_pairs) - positive
-        print(f"New class distribution: {positive} positive examples ({positive/len(entity_pairs)*100:.1f}%), "
-              f"{negative} negative examples ({negative/len(entity_pairs)*100:.1f}%)")
+        # Combine positive and sampled negative examples
+        entity_pairs = positive_pairs + sampled_negative_pairs
+        print(f"After balancing: {len(positive_pairs)} positive examples, {len(sampled_negative_pairs)} negative examples")
     
-    # Create dataset
-    dataset = BertEntityPairDataset.create_from_pairs(entity_pairs, tokenizer, max_seq_length)
+    # Split into training and validation sets
+    from sklearn.model_selection import train_test_split
     
-    # Split into train and validation sets
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
+    train_pairs, val_pairs = train_test_split(entity_pairs, test_size=0.2, random_state=42, stratify=[p['label'] for p in entity_pairs])
     
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        dataset, [train_size, val_size]
-    )
+    print(f"Total entity pairs: {len(entity_pairs)}. Splitting into {len(train_pairs)} training examples and {len(val_pairs)} validation examples.")
     
-    print(f"Split into {len(train_dataset)} training examples and {len(val_dataset)} validation examples")
+    # Create datasets
+    train_dataset = BertEntityPairDataset.create_from_pairs(train_pairs, tokenizer, max_seq_length)
+    val_dataset = BertEntityPairDataset.create_from_pairs(val_pairs, tokenizer, max_seq_length)
     
     return train_dataset, val_dataset, tokenizer
 
 def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, scheduler, num_epochs, device, model_path):
     """
-    Train the BERT model for entity-date relationship extraction.
+    Train the BERT model.
     
     Args:
         model: The BERT model
-        tokenizer: The BERT tokenizer to save alongside the model
+        tokenizer: The BERT tokenizer
         train_loader: DataLoader for training data
         val_loader: DataLoader for validation data
         optimizer: Optimizer for training
         scheduler: Learning rate scheduler
-        num_epochs: Number of training epochs
-        device: Device to train on
-        model_path: Path to save the model
+        num_epochs: Number of epochs to train for
+        device: Device to train on (cpu or cuda)
+        model_path: Path to save the best model
         
     Returns:
-        tuple: (train_losses, val_losses, val_accuracies)
+        dict: Dictionary containing training metrics
     """
+    import torch
+    import torch.nn.functional as F
     from tqdm import tqdm
-    import os
+    import numpy as np
+    from sklearn.metrics import accuracy_score, precision_recall_fscore_support
     
-    # Initialize lists to store metrics
+    # Training metrics
     train_losses = []
     val_losses = []
-    val_accuracies = []
-    
-    # Initialize best validation accuracy
-    best_val_accuracy = 0.0
+    val_accs = []
+    best_val_acc = 0
     
     # Training loop
     for epoch in range(num_epochs):
-        print(f"\nEpoch {epoch+1}/{num_epochs}")
-        
-        # Training phase
+        # Training
         model.train()
-        total_train_loss = 0
+        train_loss = 0
         train_steps = 0
         
-        # Use tqdm for progress bar
-        progress_bar = tqdm(train_loader, desc="Training")
-        
-        for batch in progress_bar:
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Train]"):
             # Move batch to device
-            batch = {k: v.to(device) for k, v in batch.items()}
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['label'].to(device)
             
-            # Clear gradients
-            optimizer.zero_grad()
+            # Handle entity category if available
+            entity_category = batch.get('entity_category')
+            if entity_category is not None:
+                entity_category = entity_category.to(device)
             
             # Forward pass
-            outputs = model(**{k: v for k, v in batch.items() if k != 'label'})
-            logits = outputs.logits
+            optimizer.zero_grad()
             
-            # Calculate loss
-            loss = torch.nn.BCEWithLogitsLoss()(logits.view(-1), batch['label'])
+            # Different models might have different forward signatures
+            try:
+                if entity_category is not None:
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        entity_category=entity_category
+                    )
+                else:
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask
+                    )
+            except TypeError:
+                # If model doesn't accept entity_category, use standard signature
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask
+                )
             
-            # Backward pass
+            # Get logits and compute loss
+            logits = outputs.logits if hasattr(outputs, 'logits') else outputs
+            
+            # Handle different output shapes
+            if len(logits.shape) > 1 and logits.shape[1] > 1:
+                # Multi-class classification
+                loss = F.cross_entropy(logits, labels.long())
+            else:
+                # Binary classification
+                loss = F.binary_cross_entropy_with_logits(logits.view(-1), labels)
+            
+            # Backward pass and optimize
             loss.backward()
-            
-            # Clip gradients
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            
-            # Update parameters
             optimizer.step()
             scheduler.step()
             
-            # Update metrics
-            total_train_loss += loss.item()
+            train_loss += loss.item()
             train_steps += 1
-            
-            # Update progress bar
-            progress_bar.set_postfix({'loss': loss.item()})
         
         # Calculate average training loss
-        avg_train_loss = total_train_loss / train_steps
+        avg_train_loss = train_loss / train_steps
         train_losses.append(avg_train_loss)
         
-        print(f"Average training loss: {avg_train_loss:.4f}")
+        # Validation
+        model.eval()
+        val_loss = 0
+        val_steps = 0
+        all_preds = []
+        all_labels = []
         
-        # Validation phase
-        if val_loader:
-            model.eval()
-            total_val_loss = 0
-            val_steps = 0
-            correct = 0
-            total = 0
-            
-            with torch.no_grad():
-                for batch in tqdm(val_loader, desc="Validation"):
-                    # Move batch to device
-                    batch = {k: v.to(device) for k, v in batch.items()}
-                    
-                    # Forward pass
-                    outputs = model(**{k: v for k, v in batch.items() if k != 'label'})
-                    logits = outputs.logits
-                    
-                    # Calculate loss
-                    loss = torch.nn.BCEWithLogitsLoss()(logits.view(-1), batch['label'])
-                    
-                    # Update metrics
-                    total_val_loss += loss.item()
-                    val_steps += 1
-                    
-                    # Calculate accuracy
-                    predictions = (torch.sigmoid(logits.view(-1)) > 0.5).float()
-                    correct += (predictions == batch['label']).sum().item()
-                    total += len(batch['label'])
-            
-            # Calculate average validation loss and accuracy
-            avg_val_loss = total_val_loss / val_steps
-            val_losses.append(avg_val_loss)
-            
-            val_accuracy = correct / total * 100
-            val_accuracies.append(val_accuracy)
-            
-            print(f"Validation loss: {avg_val_loss:.4f}")
-            print(f"Validation accuracy: {val_accuracy:.2f}%")
-            
-            # Save the best model
-            if val_accuracy > best_val_accuracy:
-                best_val_accuracy = val_accuracy
-                print(f"New best validation accuracy: {best_val_accuracy:.4f}")
+        with torch.no_grad():
+            for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Val]"):
+                # Move batch to device
+                input_ids = batch['input_ids'].to(device)
+                attention_mask = batch['attention_mask'].to(device)
+                labels = batch['label'].to(device)
                 
-                # Create directory if it doesn't exist
-                os.makedirs(os.path.dirname(model_path), exist_ok=True)
+                # Handle entity category if available
+                entity_category = batch.get('entity_category')
+                if entity_category is not None:
+                    entity_category = entity_category.to(device)
                 
-                # Save model and tokenizer
-                model.save_pretrained(model_path)
-                tokenizer.save_pretrained(model_path)
-                print(f"Model and tokenizer saved to {model_path}")
+                # Forward pass
+                try:
+                    if entity_category is not None:
+                        outputs = model(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask,
+                            entity_category=entity_category
+                        )
+                    else:
+                        outputs = model(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask
+                        )
+                except TypeError:
+                    # If model doesn't accept entity_category, use standard signature
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask
+                    )
+                
+                # Get logits and compute loss
+                logits = outputs.logits if hasattr(outputs, 'logits') else outputs
+                
+                # Handle different output shapes
+                if len(logits.shape) > 1 and logits.shape[1] > 1:
+                    # Multi-class classification
+                    loss = F.cross_entropy(logits, labels.long())
+                    preds = torch.argmax(logits, dim=1)
+                else:
+                    # Binary classification
+                    loss = F.binary_cross_entropy_with_logits(logits.view(-1), labels)
+                    preds = (torch.sigmoid(logits.view(-1)) > 0.5).float()
+                
+                val_loss += loss.item()
+                val_steps += 1
+                
+                # Collect predictions and labels
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+        
+        # Calculate validation metrics
+        avg_val_loss = val_loss / val_steps
+        val_losses.append(avg_val_loss)
+        
+        # Calculate accuracy
+        val_acc = accuracy_score(all_labels, all_preds) * 100
+        val_accs.append(val_acc)
+        
+        # Calculate precision, recall, and F1
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            all_labels, all_preds, average='binary', zero_division=0
+        )
+        
+        # Print metrics
+        print(f"Epoch {epoch+1}/{num_epochs}")
+        print(f"Train Loss: {avg_train_loss:.4f}")
+        print(f"Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+        print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+        
+        # Save the best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            print(f"New best model with validation accuracy: {val_acc:.2f}%")
+            
+            # Create directory if it doesn't exist
+            import os
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            
+            # Save the model
+            torch.save(model.state_dict(), model_path)
     
-    return train_losses, val_losses, val_accuracies
+    # Return metrics
+    metrics = {
+        'train_losses': train_losses,
+        'val_losses': val_losses,
+        'val_accs': val_accs,
+        'best_val_acc': best_val_acc,
+        'final_train_loss': train_losses[-1],
+        'final_val_loss': val_losses[-1],
+        'final_val_acc': val_accs[-1],
+        'epochs': num_epochs,
+        'train_loss': train_losses[-1],  # For consistency with log_training_run
+        'val_loss': val_losses[-1],      # For consistency with log_training_run
+        'val_acc': val_accs[-1]          # For consistency with log_training_run
+    }
+    
+    return metrics
 
 # plot_bert_training_curves has been consolidated with plot_training_curves
