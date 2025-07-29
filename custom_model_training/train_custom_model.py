@@ -22,12 +22,17 @@ from custom_model_training.training_utils_custom import prepare_custom_training_
 # Get the project root directory
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def train_with_config(config):
+def train_with_config(config, train_dataset, val_dataset, train_features, val_features, labels_info):
     """
     Train a model with the given hyperparameter configuration.
     
     Args:
         config (dict): Dictionary of hyperparameters
+        train_dataset: Pre-prepared training dataset
+        val_dataset: Pre-prepared validation dataset
+        train_features: Training features for statistics
+        val_features: Validation features for statistics
+        labels_info: Dictionary with label statistics
         
     Returns:
         tuple: (best_val_acc, model_path, metrics)
@@ -57,118 +62,6 @@ def train_with_config(config):
     
     # Set the full path for the model
     model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), model_name)
-    vocab_full_path = os.path.join(project_root, VOCAB_PATH)
-    
-    # Check if vocabulary file exists - it should be built before training
-    if not os.path.exists(vocab_full_path):
-        print(f"Error: Vocabulary file not found at {vocab_full_path}")
-        print("Please run build_vocab.py first to create the vocabulary.")
-        return 0, None, None
-    
-    # Load the pre-built vocabulary
-    print(f"Loading vocabulary from: {vocab_full_path}")
-    try:
-        # Handle different PyTorch versions
-        try:
-            # Try the newer PyTorch approach
-            vocab_instance = torch.load(vocab_full_path, weights_only=False)
-        except TypeError:
-            # For older PyTorch versions that don't have weights_only
-            vocab_instance = torch.load(vocab_full_path)
-            
-        print(f"Vocabulary loaded successfully. Size: {vocab_instance.n_words} words")
-    except Exception as e:
-        print(f"Error loading vocabulary: {e}")
-        return 0, None, None
-    
-    # Step 1: Load training data from the path specified in training_config
-    training_data_path = os.path.join(project_root, config['TRAINING_DATA_PATH'])
-    
-    if not os.path.exists(training_data_path):
-        print(f"Error: Training data file not found at {training_data_path}")
-        return 0, None, None
-    
-    print(f"Loading training data from: {training_data_path}")
-    
-    # Check if we're in multi-entity mode
-    print(f"Using entity mode: {entity_mode}")
-    
-    # Use the canonical data preparation pipeline with the 'train' data split
-    print("Loading and preparing data...")
-    
-    # Set the entity mode in the main config to match the current config
-    main_config.ENTITY_MODE = entity_mode
-    
-    try:
-        if entity_mode == 'diagnosis_only':
-            prepared_train_data, relationship_gold = load_and_prepare_data(
-                training_data_path, None, main_config, data_split_mode='train'
-            )
-        else:
-            prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
-                training_data_path, None, main_config, data_split_mode='train'
-            )
-    except ZeroDivisionError:
-        print("Error: ZeroDivisionError occurred during data loading. This is likely due to an empty dataset after splitting.")
-        print("Trying again with data_split_mode='all' to use all available data...")
-        
-        if entity_mode == 'diagnosis_only':
-            prepared_train_data, relationship_gold = load_and_prepare_data(
-                training_data_path, None, main_config, data_split_mode='all'
-            )
-        else:
-            prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
-                training_data_path, None, main_config, data_split_mode='all'
-            )
-    
-    # Now prepare the training features using the training data
-    features, labels, _ = prepare_custom_training_data(
-        training_data_path, config['MAX_DISTANCE'], None, data_split_mode='all'
-    )
-    print(f"Loaded {len(features)} examples")
-    
-    # Check class balance
-    if len(labels) > 0:
-        positive = sum(labels)
-        negative = len(labels) - positive
-        print(f"Class distribution: {positive} positive examples ({positive/len(labels)*100:.1f}%), {negative} negative examples ({negative/len(labels)*100:.1f}%)")
-        
-        # Check if we have any positive examples
-        if positive == 0:
-            print("ERROR: No positive examples found. The model will not learn anything useful.")
-            print("Please check your data format and ensure that relationship_gold contains valid relationships.")
-            return 0, None, None
-    else:
-        print("ERROR: No examples found in the dataset!")
-        print("Please check your data format and ensure that extracted_disorders and formatted_dates are correctly parsed.")
-        return 0, None, None
-    
-    # Step 3: Create train / val / test datasets 
-    train_features, val_features, train_labels, val_labels = train_test_split(
-        features, labels, test_size=0.2, random_state=42
-    )
-    
-    print(f"Train: {len(train_features)}, Validation: {len(val_features)}")
-    
-    # Create entity category map for multi-entity mode
-    entity_category_map = {
-        'diagnosis': 0,
-        'symptom': 1,
-        'procedure': 2,
-        'medication': 3
-    }
-    
-    # Create datasets using config settings
-    train_dataset = ClinicalNoteDataset(
-        train_features, train_labels, vocab_instance, 
-        config['MAX_CONTEXT_LEN'], config['MAX_DISTANCE'],
-        entity_category_map
-    ) 
-    val_dataset = ClinicalNoteDataset(
-        val_features, val_labels, vocab_instance, 
-        config['MAX_CONTEXT_LEN'], config['MAX_DISTANCE'],
-        entity_category_map
-    )
     
     # Create data loaders using config batch size
     train_loader = DataLoader(train_dataset, batch_size=config['BATCH_SIZE'], shuffle=True)
@@ -176,7 +69,7 @@ def train_with_config(config):
     
     # Step 4: Initialize and train model using config settings
     model = DiagnosisDateRelationModel(
-        vocab_size=vocab_instance.n_words, 
+        vocab_size=train_dataset.vocab.n_words, 
         embedding_dim=config['EMBEDDING_DIM'],
         hidden_dim=config['HIDDEN_DIM']
     ).to(DEVICE)
@@ -212,7 +105,7 @@ def train_with_config(config):
         'ENTITY_CATEGORY_EMBEDDING_DIM': config['ENTITY_CATEGORY_EMBEDDING_DIM'],
         'train_examples': len(train_features),
         'val_examples': len(val_features),
-        'positive_examples_pct': positive/len(labels)*100
+        'positive_examples_pct': labels_info['positive_pct']
     }
     
     # Log the training run
@@ -236,6 +129,131 @@ def train():
     hyperparameter_grid = generate_hyperparameter_grid(training_config_custom)
     print(f"Generated {len(hyperparameter_grid)} hyperparameter combinations for grid search.")
     
+    # Print summary of hyperparameter combinations
+    print("\nHyperparameter combinations to be tested:")
+    for param_name, values in training_config_custom.__dict__.items():
+        if isinstance(values, list) and not param_name.startswith('__'):
+            print(f"  {param_name}: {values}")
+    
+    # Get entity mode and dataset path from first config (they should be the same for all configs)
+    entity_mode = hyperparameter_grid[0]['ENTITY_MODE']
+    training_data_path = os.path.join(project_root, hyperparameter_grid[0]['TRAINING_DATA_PATH'])
+    dataset_name = os.path.basename(training_data_path)
+    
+    # Set the entity mode in the main config
+    main_config.ENTITY_MODE = entity_mode
+    
+    print(f"\n{'='*80}")
+    print(f"PREPARING DATA (ONLY ONCE)")
+    print(f"Using entity mode: {entity_mode}")
+    print(f"Loading training data from: {training_data_path}")
+    print(f"{'='*80}\n")
+    
+    # Load vocabulary once
+    vocab_full_path = os.path.join(project_root, VOCAB_PATH)
+    
+    # Check if vocabulary file exists - it should be built before training
+    if not os.path.exists(vocab_full_path):
+        print(f"Error: Vocabulary file not found at {vocab_full_path}")
+        print("Please run build_vocab.py first to create the vocabulary.")
+        return
+    
+    # Load the pre-built vocabulary
+    print(f"Loading vocabulary from: {vocab_full_path}")
+    try:
+        # Handle different PyTorch versions
+        try:
+            # Try the newer PyTorch approach
+            vocab_instance = torch.load(vocab_full_path, weights_only=False)
+        except TypeError:
+            # For older PyTorch versions that don't have weights_only
+            vocab_instance = torch.load(vocab_full_path)
+            
+        print(f"Vocabulary loaded successfully. Size: {vocab_instance.n_words} words")
+    except Exception as e:
+        print(f"Error loading vocabulary: {e}")
+        return
+    
+    # Load and prepare data once
+    try:
+        if entity_mode == 'diagnosis_only':
+            prepared_train_data, relationship_gold = load_and_prepare_data(
+                training_data_path, None, main_config, data_split_mode='train'
+            )
+        else:
+            prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
+                training_data_path, None, main_config, data_split_mode='train'
+            )
+    except ZeroDivisionError:
+        print("Error: ZeroDivisionError occurred during data loading. This is likely due to an empty dataset after splitting.")
+        print("Trying again with data_split_mode='all' to use all available data...")
+        
+        if entity_mode == 'diagnosis_only':
+            prepared_train_data, relationship_gold = load_and_prepare_data(
+                training_data_path, None, main_config, data_split_mode='all'
+            )
+        else:
+            prepared_train_data, entity_gold, relationship_gold, _ = load_and_prepare_data(
+                training_data_path, None, main_config, data_split_mode='all'
+            )
+    
+    # Prepare features and labels once
+    max_distance = hyperparameter_grid[0]['MAX_DISTANCE']  # Use the first config's MAX_DISTANCE
+    features, labels, _ = prepare_custom_training_data(
+        training_data_path, max_distance, None, data_split_mode='all',
+        prepared_data=prepared_train_data, relationship_gold=relationship_gold
+    )
+    print(f"Loaded {len(features)} examples")
+    
+    # Check class balance
+    labels_info = {}
+    if len(labels) > 0:
+        positive = sum(labels)
+        negative = len(labels) - positive
+        positive_pct = positive/len(labels)*100
+        labels_info['positive'] = positive
+        labels_info['negative'] = negative
+        labels_info['positive_pct'] = positive_pct
+        print(f"Class distribution: {positive} positive examples ({positive_pct:.1f}%), {negative} negative examples ({(100-positive_pct):.1f}%)")
+        
+        # Check if we have any positive examples
+        if positive == 0:
+            print("ERROR: No positive examples found. The model will not learn anything useful.")
+            print("Please check your data format and ensure that relationship_gold contains valid relationships.")
+            return
+    else:
+        print("ERROR: No examples found in the dataset!")
+        print("Please check your data format and ensure that extracted_disorders and formatted_dates are correctly parsed.")
+        return
+    
+    # Create train / val / test datasets once
+    train_features, val_features, train_labels, val_labels = train_test_split(
+        features, labels, test_size=0.2, random_state=42
+    )
+    
+    print(f"Train: {len(train_features)}, Validation: {len(val_features)}")
+    
+    # Create entity category map for multi-entity mode
+    entity_category_map = {
+        'diagnosis': 0,
+        'symptom': 1,
+        'procedure': 2,
+        'medication': 3
+    }
+    
+    # Create datasets once using config settings from first config
+    max_context_len = hyperparameter_grid[0]['MAX_CONTEXT_LEN']
+    train_dataset = ClinicalNoteDataset(
+        train_features, train_labels, vocab_instance, 
+        max_context_len, max_distance,
+        entity_category_map
+    ) 
+    val_dataset = ClinicalNoteDataset(
+        val_features, val_labels, vocab_instance, 
+        max_context_len, max_distance,
+        entity_category_map
+    )
+    
     # Track the best model across all runs
     best_val_acc = 0
     best_model_path = None
@@ -246,7 +264,9 @@ def train():
     start_time = time.time()
     for i, config in enumerate(hyperparameter_grid):
         print(f"\nTraining run {i+1}/{len(hyperparameter_grid)}")
-        val_acc, model_path, metrics = train_with_config(config)
+        val_acc, model_path, metrics = train_with_config(
+            config, train_dataset, val_dataset, train_features, val_features, labels_info
+        )
         
         # Update best model if this run is better
         if val_acc > best_val_acc:

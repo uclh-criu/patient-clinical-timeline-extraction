@@ -35,7 +35,8 @@ def sanitize_datetime_strings(s):
     
     return re.sub(pattern, replace_date, s)
 
-def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class=None, data_split_mode='all'):
+def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class=None, data_split_mode='all', 
+                                prepared_data=None, relationship_gold=None):
     """
     Prepare data for training the custom model.
     
@@ -47,19 +48,25 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
             - 'train': Use only the training portion (first TRAINING_SET_RATIO)
             - 'test': Use only the testing portion (remaining 1-TRAINING_SET_RATIO)
             - 'all': Use all data without splitting (default)
+        prepared_data: Pre-loaded prepared data (to avoid loading from file again)
+        relationship_gold: Pre-loaded relationship gold data (to avoid loading from file again)
         
     Returns:
         tuple: (features, labels, vocab) - processed data and vocabulary instance
     """
-    from utils.inference_eval_utils import load_and_prepare_data as canonical_load
     from utils.inference_eval_utils import preprocess_note_for_prediction, transform_python_to_json
     
     # Initialize vocabulary if needed
     vocab = vocab_class() if vocab_class else None
     
-    if isinstance(dataset_path_or_data, str):
+    # If prepared_data and relationship_gold are provided, use them directly
+    if prepared_data is not None and relationship_gold is not None:
+        print("Using pre-loaded data (skipping file loading)")
+    elif isinstance(dataset_path_or_data, str):
         # It's a file path, use the canonical function to load it
         print(f"Loading data from file: {dataset_path_or_data} with split mode: {data_split_mode}")
+        
+        from utils.inference_eval_utils import load_and_prepare_data as canonical_load
         
         # Make sure we have the necessary config attributes for training
         if not hasattr(config, 'RELATIONSHIP_GOLD_COLUMN'):
@@ -234,51 +241,20 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
         entity_categories[(entity_label, date)] = rel.get('entity_category', 'diagnosis').lower()
     
     # Print detailed diagnostic information about the data
-    print("\n===== DETAILED DATA DIAGNOSTICS =====")
+    print("\n===== GENERATING FEATURES FROM PREPARED DATA =====")
     print(f"Found {len(gold_relationships)} gold standard relationships")
     print(f"Found {len(prepared_data)} notes with entity data")
     
-    # Show sample of the relationship_gold data
-    print("\nSample of raw relationship_gold data:")
-    if relationship_gold and len(relationship_gold) > 0:
-        for i, rel in enumerate(relationship_gold[:3]):
-            print(f"  {i+1}. {rel}")
-    
-    # Show sample of the parsed entities
-    print("\nSample of parsed entities:")
-    if prepared_data and len(prepared_data) > 0:
-        sample_note = prepared_data[0]
-        disorders, dates = sample_note['entities']
-        
-        print(f"  Disorders ({len(disorders)}):")
-        for i, disorder in enumerate(disorders[:5]):
-            print(f"    {i+1}. {disorder}")
-            
-        print(f"  Dates ({len(dates)}):")
-        for i, date in enumerate(dates[:5]):
-            print(f"    {i+1}. {date}")
-    else:
-        print("  No entities found in prepared data")
-    
-    # Show sample of gold relationships
-    if gold_relationships:
-        print("\nSample gold relationships (first 5):")
-        for i, (entity, date) in enumerate(list(gold_relationships)[:5]):
-            category = entity_categories.get((entity, date), 'diagnosis')
-            print(f"  {i+1}. Entity: '{entity}', Category: '{category}', Date: '{date}'")
-    else:
-        print("\nWARNING: No gold standard relationships found. Check your data format.")
+    # Determine if we're in multi-entity mode
+    entity_mode = getattr(config, 'ENTITY_MODE', 'diagnosis_only')
+    is_multi_entity = entity_mode == 'multi_entity'
+    print(f"Using entity mode: {entity_mode}")
     
     # Generate features and labels
     all_features = []
     all_labels = []
     total_examples = 0
     total_positive = 0
-    
-    # Determine if we're in multi-entity mode
-    entity_mode = getattr(config, 'ENTITY_MODE', 'diagnosis_only')
-    is_multi_entity = entity_mode == 'multi_entity'
-    print(f"\nUsing entity mode: {entity_mode}")
     
     for note_entry in prepared_data:
         note_text = note_entry['note']
