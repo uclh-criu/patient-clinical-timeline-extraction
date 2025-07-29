@@ -22,6 +22,7 @@ seaborn==0.13.2
 
 # Development tools
 ipykernel==6.29.5
+pytest-cov==6.2.1
 
 # Optional packages (for specific extractors)
 # Uncomment if using specific features:

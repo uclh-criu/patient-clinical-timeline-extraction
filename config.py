@@ -27,6 +27,11 @@ NOTES_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_notes.csv'
 LETTERS_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_letters.csv'
 NPH_DATA_PATH = 'data/synthetic_results_final.csv'
 
+# --- Test Data Paths --- #
+# These paths point to the datasets used for automated testing
+TEST_DIAGNOSIS_ONLY_DATA_PATH = 'data/synthetic.csv'
+TEST_MULTI_ENTITY_DATA_PATH = 'data/synthetic_updated.csv'
+
 # --- Data Column Names --- #
 PATIENT_ID_COLUMN = 'patient'     # Column containing patient identifiers
 TEXT_COLUMN = 'note'              # Column containing clinical notes
