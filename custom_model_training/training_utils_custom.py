@@ -9,7 +9,9 @@ import ast  # Add ast module for literal_eval
 import csv
 import datetime
 import pandas as pd
+import numpy as np
 from pathlib import Path
+from sklearn.metrics import f1_score, precision_score, recall_score
 
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -309,7 +311,7 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
 # Training function
 def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, device, model_save_path=None):
     """
-    Train the model and track the best version based on validation accuracy.
+    Train the model and track the best version based on validation F1-score.
     
     Args:
         model: The PyTorch model to train
@@ -327,7 +329,10 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
     train_losses = []
     val_losses = []
     val_accs = []
-    best_val_acc = 0
+    val_f1s = []
+    val_precisions = []
+    val_recalls = []
+    best_val_f1 = 0
     best_model_state = None  # Store the best model state in memory
     
     for epoch in range(epochs):
@@ -364,8 +369,8 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
         # Validation
         model.eval()
         val_loss = 0
-        correct = 0
-        total = 0
+        all_preds = []
+        all_labels = []
         
         with torch.no_grad():
             for batch in val_loader:
@@ -386,38 +391,66 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
                 
                 val_loss += loss.item()
                 
-                # Calculate accuracy
+                # Store predictions and labels for computing metrics
                 predicted = (outputs > 0.5).float()
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
         
         val_loss /= len(val_loader)
         val_losses.append(val_loss)
         
+        # Calculate metrics
+        all_preds = np.array(all_preds)
+        all_labels = np.array(all_labels)
+        
+        # Calculate accuracy
+        correct = (all_preds == all_labels).sum()
+        total = len(all_labels)
         val_acc = 100 * correct / total
         val_accs.append(val_acc)
         
-        # Store the best model state in memory
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_model_state = model.state_dict().copy()  # Create a copy of the state dict
-            print(f"New best validation accuracy found: {val_acc:.2f}%")
+        # Calculate F1, precision, and recall
+        val_f1 = f1_score(all_labels, all_preds)
+        val_precision = precision_score(all_labels, all_preds, zero_division=0)
+        val_recall = recall_score(all_labels, all_preds)
         
-        print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+        val_f1s.append(val_f1)
+        val_precisions.append(val_precision)
+        val_recalls.append(val_recall)
+        
+        # Store the best model state in memory based on F1-score
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            best_model_state = model.state_dict().copy()  # Create a copy of the state dict
+            print(f"New best validation F1-score found: {val_f1:.4f} (P: {val_precision:.4f}, R: {val_recall:.4f}, Acc: {val_acc:.2f}%)")
+        
+        print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}, Val Acc: {val_acc:.2f}%')
     
     # Return metrics as a dictionary for logging
     metrics = {
         'train_losses': train_losses,
         'val_losses': val_losses,
         'val_accs': val_accs,
-        'best_val_acc': best_val_acc,
+        'val_f1s': val_f1s,
+        'val_precisions': val_precisions,
+        'val_recalls': val_recalls,
+        'best_val_f1': best_val_f1,
+        'best_val_acc': val_accs[val_f1s.index(best_val_f1)],  # Accuracy at best F1
+        'best_val_precision': val_precisions[val_f1s.index(best_val_f1)],  # Precision at best F1
+        'best_val_recall': val_recalls[val_f1s.index(best_val_f1)],  # Recall at best F1
         'final_train_loss': train_losses[-1],
         'final_val_loss': val_losses[-1],
         'final_val_acc': val_accs[-1],
+        'final_val_f1': val_f1s[-1],
+        'final_val_precision': val_precisions[-1],
+        'final_val_recall': val_recalls[-1],
         'epochs': epochs,
         'train_loss': train_losses[-1],  # For consistency with log_training_run
         'val_loss': val_losses[-1],      # For consistency with log_training_run
-        'val_acc': val_accs[-1]          # For consistency with log_training_run
+        'val_acc': val_accs[-1],         # For consistency with log_training_run
+        'val_f1': val_f1s[-1],           # For consistency with log_training_run
+        'val_precision': val_precisions[-1],  # For consistency with log_training_run
+        'val_recall': val_recalls[-1]    # For consistency with log_training_run
     }
     
     return best_model_state, metrics

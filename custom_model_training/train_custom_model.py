@@ -35,7 +35,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         labels_info: Dictionary with label statistics
         
     Returns:
-        tuple: (best_val_acc, best_model_state, metrics, model_name)
+        tuple: (best_val_f1, best_model_state, metrics, model_name)
     """
     print(f"\n{'='*80}")
     print(f"Training with configuration:")
@@ -115,7 +115,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         'custom_model_training_log.csv'
     )
     
-    return metrics['best_val_acc'], best_model_state, metrics, model_name
+    return metrics['best_val_f1'], best_model_state, metrics, model_name
 
 def train():
     print(f"Using device: {DEVICE}")
@@ -251,7 +251,7 @@ def train():
     )
     
     # Track the best model across all runs
-    best_val_acc = 0
+    best_val_f1 = 0
     best_model_state = None
     best_config = None
     best_metrics = None
@@ -261,24 +261,28 @@ def train():
     start_time = time.time()
     for i, config in enumerate(hyperparameter_grid):
         print(f"\nTraining run {i+1}/{len(hyperparameter_grid)}")
-        val_acc, model_state, metrics, model_name = train_with_config(
+        val_f1, model_state, metrics, model_name = train_with_config(
             config, train_dataset, val_dataset, train_features, val_features, labels_info
         )
         
         # Update best model if this run is better
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
             best_model_state = model_state
             best_config = config
             best_metrics = metrics
             best_model_name = model_name
-            print(f"\n*** New best model found with validation accuracy: {best_val_acc:.2f}% ***")
+            print(f"\n*** New best model found with validation F1-score: {best_val_f1:.4f} ***")
+            print(f"   Precision: {metrics['best_val_precision']:.4f}, Recall: {metrics['best_val_recall']:.4f}, Accuracy: {metrics['best_val_acc']:.2f}%")
     
     # Print summary of grid search
     elapsed_time = time.time() - start_time
     print(f"\n{'='*80}")
     print(f"Grid search completed in {elapsed_time:.2f} seconds.")
-    print(f"Best validation accuracy: {best_val_acc:.2f}%")
+    print(f"Best validation F1-score: {best_val_f1:.4f}")
+    print(f"Best validation Precision: {best_metrics['best_val_precision']:.4f}")
+    print(f"Best validation Recall: {best_metrics['best_val_recall']:.4f}")
+    print(f"Best validation Accuracy: {best_metrics['best_val_acc']:.2f}%")
     
     # Save the best model once at the end of the grid search
     if best_model_state is not None:
