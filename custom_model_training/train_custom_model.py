@@ -23,16 +23,29 @@ from custom_model_training.training_utils_custom import prepare_custom_training_
 from custom_model_training.training_utils_custom import train_model, plot_training_curves
 from config import DEVICE, MODEL_PATH, VOCAB_PATH, TRAINING_SET_RATIO, DATA_SPLIT_RANDOM_SEED
 from utils.inference_eval_utils import load_and_prepare_data
+import config as main_config
 
 def train():
     print(f"Using device: {DEVICE}")
     
+    # Get entity mode from training config
+    entity_mode = training_config_custom.ENTITY_MODE
+    
+    # Get dataset name from training data path
+    dataset_path = training_config_custom.TRAINING_DATA_PATH
+    dataset_name = os.path.basename(dataset_path)
+    
+    # Create model name based on dataset and entity mode
+    model_name = f"custom_{os.path.splitext(dataset_name)[0]}_{entity_mode}.pt"
+    
     # Ensure the training directory exists for outputs
-    model_full_path = os.path.join(project_root, MODEL_PATH)
-    vocab_full_path = os.path.join(project_root, VOCAB_PATH)
-    output_dir = os.path.dirname(model_full_path) 
+    output_dir = os.path.join(project_root, os.path.dirname(MODEL_PATH))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    
+    # Set the full path for the model
+    model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), model_name)
+    vocab_full_path = os.path.join(project_root, VOCAB_PATH)
     
     # Check if vocabulary file exists - it should be built before training
     if not os.path.exists(vocab_full_path):
@@ -66,16 +79,11 @@ def train():
     print(f"Loading training data from: {training_data_path}")
     
     # Check if we're in multi-entity mode
-    entity_mode = training_config_custom.ENTITY_MODE
     print(f"Using entity mode: {entity_mode}")
     
     # Use the canonical data preparation pipeline with the 'train' data split
     # This will directly load the CSV file and parse all entities and relationships
     print("Loading and preparing data...")
-    
-    # First, load the training split using load_and_prepare_data
-    # This ensures we're using the same split logic as in inference
-    import config as main_config
     
     # Set the entity mode in the main config to match training_config_custom
     main_config.ENTITY_MODE = entity_mode
@@ -168,14 +176,37 @@ def train():
     
     # Train model using training_config epochs
     print("Training model...")
-    train_losses, val_losses, val_accs = train_model(
+    metrics = train_model(
         model, train_loader, val_loader, optimizer, criterion, 
         training_config_custom.NUM_EPOCHS, DEVICE, model_full_path
     )
     
     # Plot training curves
-    plot_save_path = os.path.join(output_dir, 'training_curves.png')
-    plot_training_curves(train_losses, val_losses, val_accs, plot_save_path)
+    plot_save_path = os.path.join(output_dir, f"{os.path.splitext(model_name)[0]}_training_curves")
+    plot_training_curves(metrics, plot_save_path)
+    
+    # Collect hyperparameters for logging
+    hyperparams = {
+        'ENTITY_MODE': entity_mode,
+        'MAX_DISTANCE': training_config_custom.MAX_DISTANCE,
+        'MAX_CONTEXT_LEN': training_config_custom.MAX_CONTEXT_LEN,
+        'EMBEDDING_DIM': training_config_custom.EMBEDDING_DIM,
+        'HIDDEN_DIM': training_config_custom.HIDDEN_DIM,
+        'BATCH_SIZE': training_config_custom.BATCH_SIZE,
+        'LEARNING_RATE': training_config_custom.LEARNING_RATE,
+        'NUM_EPOCHS': training_config_custom.NUM_EPOCHS,
+        'DROPOUT': training_config_custom.DROPOUT,
+        'USE_DISTANCE_FEATURE': training_config_custom.USE_DISTANCE_FEATURE,
+        'USE_POSITION_FEATURE': training_config_custom.USE_POSITION_FEATURE,
+        'ENTITY_CATEGORY_EMBEDDING_DIM': training_config_custom.ENTITY_CATEGORY_EMBEDDING_DIM,
+        'train_examples': len(train_features),
+        'val_examples': len(val_features),
+        'positive_examples_pct': positive/len(labels)*100
+    }
+    
+    # Log the training run
+    from custom_model_training.training_utils_custom import log_training_run
+    log_training_run(model_full_path, hyperparams, metrics, dataset_name, entity_mode)
     
     print("Done!")
 

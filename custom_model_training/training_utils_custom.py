@@ -6,6 +6,10 @@ import torch
 import matplotlib.pyplot as plt
 import config # Import the config module
 import ast  # Add ast module for literal_eval
+import csv
+import datetime
+import pandas as pd
+from pathlib import Path
 
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +34,65 @@ def sanitize_datetime_strings(s):
         return f'"{year}-{month}-{day}"'
     
     return re.sub(pattern, replace_date, s)
+
+def log_training_run(model_path, hyperparams, metrics, dataset_name, entity_mode):
+    """
+    Log training run details to a CSV file.
+    
+    Args:
+        model_path (str): Path to the saved model
+        hyperparams (dict): Dictionary of hyperparameters used for training
+        metrics (dict): Dictionary of training metrics (e.g., val_acc, val_loss)
+        dataset_name (str): Name of the dataset used for training
+        entity_mode (str): Entity mode used for training ('diagnosis_only' or 'multi_entity')
+    """
+    # Create custom_model_training directory if it doesn't exist
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_dir = os.path.join(project_root, 'custom_model_training')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Define the log file path
+    log_file = os.path.join(log_dir, 'custom_model_training_log.csv')
+    
+    # Get current timestamp
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Extract model filename from path
+    model_filename = os.path.basename(model_path)
+    
+    # Prepare the log entry
+    log_entry = {
+        'timestamp': timestamp,
+        'dataset': dataset_name,
+        'entity_mode': entity_mode,
+        'model_filename': model_filename,
+        'val_accuracy': metrics.get('val_acc', 0),
+        'val_loss': metrics.get('val_loss', 0),
+        'train_loss': metrics.get('train_loss', 0),
+        'epochs': metrics.get('epochs', 0),
+    }
+    
+    # Add all hyperparameters to the log entry
+    for key, value in hyperparams.items():
+        log_entry[key] = value
+    
+    # Check if the log file exists
+    file_exists = os.path.isfile(log_file)
+    
+    # Write to the CSV file
+    try:
+        with open(log_file, mode='a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=log_entry.keys())
+            
+            # Write header if file doesn't exist
+            if not file_exists:
+                writer.writeheader()
+            
+            writer.writerow(log_entry)
+        
+        print(f"Training run logged to {log_file}")
+    except Exception as e:
+        print(f"Error logging training run: {e}")
 
 def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class=None, data_split_mode='all'):
     """
@@ -328,6 +391,22 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
 
 # Training function
 def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, device, model_save_path):
+    """
+    Train the model and save the best version based on validation accuracy.
+    
+    Args:
+        model: The PyTorch model to train
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data
+        optimizer: The optimizer to use
+        criterion: The loss function
+        epochs: Number of epochs to train for
+        device: Device to train on (cpu or cuda)
+        model_save_path: Path to save the best model
+        
+    Returns:
+        dict: Dictionary containing training metrics
+    """
     # model_save_path should be the full path from config
     train_losses = []
     val_losses = []
@@ -407,20 +486,34 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
             # Ensure directory exists before saving
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             torch.save(model.state_dict(), model_save_path)
+            print(f"New best model saved with validation accuracy: {val_acc:.2f}%")
         
         print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
     
-    return train_losses, val_losses, val_accs
+    # Return metrics as a dictionary for logging
+    metrics = {
+        'train_losses': train_losses,
+        'val_losses': val_losses,
+        'val_accs': val_accs,
+        'best_val_acc': best_val_acc,
+        'final_train_loss': train_losses[-1],
+        'final_val_loss': val_losses[-1],
+        'final_val_acc': val_accs[-1],
+        'epochs': epochs,
+        'train_loss': train_losses[-1],  # For consistency with log_training_run
+        'val_loss': val_losses[-1],      # For consistency with log_training_run
+        'val_acc': val_accs[-1]          # For consistency with log_training_run
+    }
+    
+    return metrics
 
 # Plot training progress
-def plot_training_curves(train_losses, val_losses, val_accs, save_path, show_plot=False):
+def plot_training_curves(metrics, save_path, show_plot=False):
     """
     Plot training curves for model training.
     
     Args:
-        train_losses: List of training losses
-        val_losses: List of validation losses
-        val_accs: List of validation accuracies
+        metrics (dict): Dictionary containing training metrics (train_losses, val_losses, val_accs)
         save_path: Path to save the plot
         show_plot: Whether to display the plot (default: False)
     """
@@ -432,6 +525,10 @@ def plot_training_curves(train_losses, val_losses, val_accs, save_path, show_plo
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
     
     # Plot losses
+    train_losses = metrics['train_losses']
+    val_losses = metrics['val_losses']
+    val_accs = metrics['val_accs']
+    
     epochs = range(1, len(train_losses) + 1)
     ax1.plot(epochs, train_losses, 'b-', label='Training Loss')
     ax1.plot(epochs, val_losses, 'r-', label='Validation Loss')
