@@ -1,9 +1,13 @@
 import os
 import torch
+import sys
+
+# Add project root to path to allow importing from other directories
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
 from extractors.base_extractor import BaseRelationExtractor
 from custom_model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
-from custom_model_training.Vocabulary import Vocabulary
-from custom_model_training.training_config_custom import EMBEDDING_DIM, HIDDEN_DIM
 from utils.inference_eval_utils import preprocess_note_for_prediction, create_prediction_dataset, predict_relationships
 
 class CustomExtractor(BaseRelationExtractor):
@@ -28,9 +32,11 @@ class CustomExtractor(BaseRelationExtractor):
         self.device = config.DEVICE
         self.name = "Custom (PyTorch NN)"
         self.debug = getattr(config, 'MODEL_DEBUG_MODE', False)
+        self.threshold = 0.5  # Default threshold, will be updated from saved model if available
         
         self.model = None
         self.vocab = None 
+        self.model_config = None
         
     def load(self):
         """
@@ -61,15 +67,126 @@ class CustomExtractor(BaseRelationExtractor):
             print(f"Vocabulary loaded successfully. Size: {self.vocab.n_words} words.")
             
             print(f"Loading custom model from: {self.model_path}")
-            self.model = DiagnosisDateRelationModel(
-                vocab_size=self.vocab.n_words,
-                embedding_dim=EMBEDDING_DIM,
-                hidden_dim=HIDDEN_DIM
-            ).to(self.device)
             
-            self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
+            # Load the saved model checkpoint
+            checkpoint = torch.load(self.model_path, map_location=self.device)
+            
+            # Check if the checkpoint contains hyperparameters
+            if isinstance(checkpoint, dict) and 'hyperparameters' in checkpoint:
+                # New format - contains hyperparameters
+                self.model_config = checkpoint['hyperparameters']
+                model_state_dict = checkpoint['model_state_dict']
+                vocab_size = checkpoint.get('vocab_size', self.vocab.n_words)
+                
+                # Get the best threshold if available
+                if 'best_threshold' in checkpoint:
+                    self.threshold = checkpoint['best_threshold']
+                    print(f"Using optimal threshold from saved model: {self.threshold:.2f}")
+                
+                # Initialize model with saved hyperparameters
+                self.model = DiagnosisDateRelationModel(
+                    vocab_size=vocab_size,
+                    embedding_dim=self.model_config['EMBEDDING_DIM'],
+                    hidden_dim=self.model_config['HIDDEN_DIM'],
+                    apply_sigmoid=not self.model_config.get('USE_WEIGHTED_LOSS', False)
+                ).to(self.device)
+                
+                self.model.load_state_dict(model_state_dict)
+            else:
+                # Old format - just the model state dict
+                print("Warning: Model file doesn't contain hyperparameters. Using default values.")
+                from custom_model_training.training_config_custom import EMBEDDING_DIM, HIDDEN_DIM
+                
+                # First try to load the model with default parameters
+                try:
+                    # Try with different embedding dimensions
+                    for embedding_dim in [100, 128, 200, 256]:
+                        for hidden_dim in [128, 256]:
+                            try:
+                                print(f"Trying with embedding_dim={embedding_dim}, hidden_dim={hidden_dim}")
+                                self.model = DiagnosisDateRelationModel(
+                                    vocab_size=self.vocab.n_words,
+                                    embedding_dim=embedding_dim,
+                                    hidden_dim=hidden_dim
+                                ).to(self.device)
+                                
+                                self.model.load_state_dict(checkpoint)
+                                print(f"Successfully loaded model with parameters: embedding_dim={embedding_dim}, hidden_dim={hidden_dim}")
+                                
+                                # Create a model config for compatibility
+                                self.model_config = {
+                                    'EMBEDDING_DIM': embedding_dim,
+                                    'HIDDEN_DIM': hidden_dim,
+                                    'USE_WEIGHTED_LOSS': False
+                                }
+                                
+                                return True
+                            except Exception:
+                                # Try next combination
+                                pass
+                    
+                    # If we get here, none of the combinations worked
+                    raise ValueError("None of the parameter combinations worked")
+                except Exception as e:
+                    print(f"Error loading with default parameters: {e}")
+                    print("Trying to create a compatible model structure...")
+                    
+                    # If loading fails, try to infer the parameters from the checkpoint
+                    # This is a bit hacky but necessary for backward compatibility
+                    # Try to infer model parameters from the checkpoint
+                    inferred_params = {}
+                    
+                    # Check for embedding dimensions
+                    if 'embedding.weight' in checkpoint:
+                        inferred_params['vocab_size'], inferred_params['embedding_dim'] = checkpoint['embedding.weight'].shape
+                        print(f"Inferred embedding_dim: {inferred_params['embedding_dim']}")
+                    
+                    # Try to infer hidden_dim from various weights
+                    if 'conv1.weight' in checkpoint:
+                        inferred_params['hidden_dim'] = checkpoint['conv1.weight'].shape[0]
+                        print(f"Inferred hidden_dim from conv1.weight: {inferred_params['hidden_dim']}")
+                    elif 'lstm.weight_ih_l0' in checkpoint:
+                        # LSTM weights have 4x the hidden dimension
+                        inferred_params['hidden_dim'] = checkpoint['lstm.weight_ih_l0'].shape[0] // 4
+                        print(f"Inferred hidden_dim from lstm.weight_ih_l0: {inferred_params['hidden_dim']}")
+                    elif 'fc2.weight' in checkpoint:
+                        inferred_params['hidden_dim'] = checkpoint['fc2.weight'].shape[1]
+                        print(f"Inferred hidden_dim from fc2.weight: {inferred_params['hidden_dim']}")
+                    
+                    # If we have enough information, try to create the model
+                    if 'embedding_dim' in inferred_params and 'hidden_dim' in inferred_params:
+                        print(f"Creating model with inferred parameters: embedding_dim={inferred_params['embedding_dim']}, hidden_dim={inferred_params['hidden_dim']}")
+                        
+                        # Create model with inferred parameters
+                        try:
+                            self.model = DiagnosisDateRelationModel(
+                                vocab_size=self.vocab.n_words,
+                                embedding_dim=inferred_params['embedding_dim'],
+                                hidden_dim=inferred_params['hidden_dim']
+                            ).to(self.device)
+                            
+                            # Try to load the state dictionary
+                            self.model.load_state_dict(checkpoint)
+                            print("Successfully loaded model with inferred parameters")
+                            
+                            # Create a simple model config for compatibility
+                            self.model_config = {
+                                'EMBEDDING_DIM': inferred_params['embedding_dim'],
+                                'HIDDEN_DIM': inferred_params['hidden_dim'],
+                                'USE_WEIGHTED_LOSS': False
+                            }
+                            
+                            return True
+                        except Exception as e2:
+                            print(f"Error loading with inferred parameters: {e2}")
+                            return False
+                    else:
+                        print("Could not infer all required parameters from checkpoint")
+                        print(f"Available parameters: {list(inferred_params.keys())}")
+                        print(f"Missing parameters: {'embedding_dim' if 'embedding_dim' not in inferred_params else ''} {'hidden_dim' if 'hidden_dim' not in inferred_params else ''}")
+                        return False
+            
             self.model.eval()
-            
             print(f"Successfully loaded {self.name}")
             return True
         except Exception as e:
@@ -116,56 +233,21 @@ class CustomExtractor(BaseRelationExtractor):
                 entity_pos = entity.get('start', 0)
                 entity_category = entity.get('category', 'unknown')
                 diagnoses.append((entity_label, entity_pos, entity_category))
-            else:
+            elif isinstance(entity, tuple) and len(entity) >= 2:
                 # Legacy format: tuple of (label, position)
-                entity_label, entity_pos = entity
-                diagnoses.append((entity_label, entity_pos, 'disorder'))  # Default category
+                entity_label, entity_pos = entity[0], entity[1]
+                entity_category = entity[2] if len(entity) > 2 else 'disorder'
+                diagnoses.append((entity_label, entity_pos, entity_category))
+            elif isinstance(entity, list) and len(entity) >= 2:
+                # List format: [label, position]
+                entity_label, entity_pos = entity[0], entity[1]
+                entity_category = entity[2] if len(entity) > 2 else 'disorder'
+                diagnoses.append((entity_label, entity_pos, entity_category))
         
         # Extract just the position information needed for preprocess_note_for_prediction
         diagnoses_for_model = [(d[0], d[1]) for d in diagnoses]
         
-        # DIAGNOSTIC: Print the extracted entities and dates
-        # Comment out the extracted entities and dates section
-        """
-        if self.debug:
-            print("\n===== DIAGNOSTIC: EXTRACTED ENTITIES AND DATES =====")
-            print(f"Number of diagnoses: {len(diagnoses_for_model)}")
-            for i, (label, pos) in enumerate(diagnoses_for_model[:5]):  # Show first 5
-                print(f"  Diagnosis {i+1}: '{label}' at position {pos}")
-                # Show the text snippet around this diagnosis
-                start = max(0, pos - 20)
-                end = min(len(text), pos + 20)
-                snippet = text[start:end].replace('\n', ' ')
-                print(f"     Context: '...{snippet}...'")
-            
-            print(f"Number of dates: {len(dates)}")
-            for i, (parsed_date, date_str, pos) in enumerate(dates[:5]):  # Show first 5
-                print(f"  Date {i+1}: '{date_str}' at position {pos}, parsed as '{parsed_date}'")
-                # Show the text snippet around this date
-                start = max(0, pos - 20)
-                end = min(len(text), pos + 20)
-                snippet = text[start:end].replace('\n', ' ')
-                print(f"     Context: '...{snippet}...'")
-        """
-        
         features = preprocess_note_for_prediction(text, diagnoses_for_model, dates, self.pred_max_distance)
-        
-        # DIAGNOSTIC: Print the generated features (candidate pairs)
-        # Comment out the redundant candidate pairs section
-        """
-        if self.debug:
-            print("\n===== DIAGNOSTIC: GENERATED CANDIDATE PAIRS =====")
-            print(f"Number of candidate pairs: {len(features)}")
-            for i, feature in enumerate(features[:3]):  # Show first 3 pairs
-                print(f"\nCandidate Pair {i+1}:")
-                print(f"  Diagnosis: '{feature['diagnosis']}'")
-                print(f"  Date: '{feature['date']}'")
-                print(f"  Distance (words): {feature['distance']}")
-                print(f"  Diagnosis before date: {feature['diag_before_date']}")
-                print(f"  Context snippet (truncated): '{feature['context'][:100]}...'")
-            if len(features) > 3:
-                print(f"  ... and {len(features) - 3} more candidate pairs")
-        """
         
         # Pass the confirmed lists to the next function
         test_data = create_prediction_dataset(features, self.vocab, self.device, 
@@ -175,36 +257,40 @@ class CustomExtractor(BaseRelationExtractor):
         entity_predictions = {}
         self.model.eval()
         
-        # Comment out the MODEL PREDICTIONS section
-        """
-        if self.debug:
-            print("\n===== DIAGNOSTIC: MODEL PREDICTIONS =====")
-        """
-        
         prediction_count = 0
         
         with torch.no_grad():
             for data in test_data:
-                # DIAGNOSTIC: Print the input tensors (shapes and values)
-                #if self.debug and prediction_count < 3:  # Only print first 3 for brevity
-                    #print(f"\nPrediction {prediction_count + 1}:")
-                    #print(f"  Context tensor shape: {data['context'].shape}")
-                    #print(f"  Distance value: {data['distance'].item()}")
-                    #print(f"  Diag_before value: {data['diag_before'].item()}")
-                
-                output = self.model(data['context'], data['distance'], data['diag_before'])
-                prob = output.item()
-                
+                # Get entity category ID (0=diagnosis, 1=symptom, 2=procedure, 3=medication)
                 feature = data['feature']
                 diagnosis = feature['diagnosis']
                 date = feature['date']
                 
-                # Comment out the model's prediction prints
-                """
-                # DIAGNOSTIC: Print the model's prediction for ALL pairs, not just the first 3
-                if self.debug:
-                    print(f"  Prediction for '{diagnosis}' and '{date}': {prob:.4f}")
-                """
+                # Find the corresponding entity category
+                entity_category = 'disorder'  # Default
+                entity_category_id = 0  # Default to diagnosis (0)
+                for entity_label, _, category in diagnoses:
+                    if entity_label == diagnosis:
+                        entity_category = category
+                        # Map category string to ID
+                        if category.lower() in ['symptom', 'symptoms', 'finding']:
+                            entity_category_id = 1
+                        elif category.lower() in ['procedure', 'treatment']:
+                            entity_category_id = 2
+                        elif category.lower() in ['medication', 'drug']:
+                            entity_category_id = 3
+                        break
+                
+                # Convert to tensor
+                entity_category_tensor = torch.tensor([entity_category_id], dtype=torch.long, device=self.device)
+                
+                # Pass entity category to model
+                try:
+                    output = self.model(data['context'], data['distance'], data['diag_before'], entity_category_tensor)
+                except Exception:
+                    # Fallback if entity_category is not supported
+                    output = self.model(data['context'], data['distance'], data['diag_before'])
+                prob = output.item()
                 
                 prediction_count += 1
                 
@@ -232,7 +318,6 @@ class CustomExtractor(BaseRelationExtractor):
         
         if self.debug:
             print("\n===== DIAGNOSTIC: FINAL RELATIONSHIP SELECTIONS =====")
-            # Remove the full note text print since it's now in the comparison section
         
         for entity_key, predictions in entity_predictions.items():
             if predictions:
@@ -242,20 +327,26 @@ class CustomExtractor(BaseRelationExtractor):
                 # Sort predictions by confidence (highest first)
                 best_prediction = max(predictions, key=lambda x: x['confidence'])
                 
-                # DIAGNOSTIC: Print the best prediction for each entity
-                if self.debug:
+                # Only include predictions that meet the threshold
+                if best_prediction['confidence'] >= self.threshold:
+                    # DIAGNOSTIC: Print the best prediction for each entity
+                    if self.debug:
+                        print(f"Entity: '{entity_label}' ({entity_category})")
+                        print(f"  Best date: '{best_prediction['date']}' with confidence: {best_prediction['confidence']:.4f}")
+                        print(f"  Threshold: {self.threshold:.2f}")
+                        if len(predictions) > 1:
+                            print(f"  (Selected from {len(predictions)} candidate dates)")
+                    
+                    # Add the best prediction to our results
+                    relationships.append({
+                        'entity_label': entity_label,
+                        'entity_category': entity_category,
+                        'date': best_prediction['date'],
+                        'confidence': best_prediction['confidence']
+                    })
+                elif self.debug:
                     print(f"Entity: '{entity_label}' ({entity_category})")
-                    print(f"  Best date: '{best_prediction['date']}' with confidence: {best_prediction['confidence']:.4f}")
-                    if len(predictions) > 1:
-                        print(f"  (Selected from {len(predictions)} candidate dates)")
-                
-                # Add the best prediction to our results
-                relationships.append({
-                    'entity_label': entity_label,
-                    'entity_category': entity_category,
-                    'date': best_prediction['date'],
-                    'confidence': best_prediction['confidence']
-                })
+                    print(f"  Rejected: confidence {best_prediction['confidence']:.4f} below threshold {self.threshold:.2f}")
         
         if self.debug:
             print("\n===== END OF DIAGNOSTIC OUTPUT =====\n")

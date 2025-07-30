@@ -311,8 +311,35 @@ def train():
         model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), best_model_name)
         # Ensure directory exists before saving
         os.makedirs(os.path.dirname(model_full_path), exist_ok=True)
-        torch.save(best_model_state, model_full_path)
-        print(f"Best model saved to: {model_full_path}")
+        
+        # Create a dictionary to save both model state and hyperparameters
+        # Create a simplified version of the config with only serializable data
+        serializable_config = {
+            'ENTITY_MODE': best_config.get('ENTITY_MODE'),
+            'MAX_DISTANCE': best_config.get('MAX_DISTANCE'),
+            'MAX_CONTEXT_LEN': best_config.get('MAX_CONTEXT_LEN'),
+            'EMBEDDING_DIM': best_config.get('EMBEDDING_DIM'),
+            'HIDDEN_DIM': best_config.get('HIDDEN_DIM'),
+            'BATCH_SIZE': best_config.get('BATCH_SIZE'),
+            'LEARNING_RATE': best_config.get('LEARNING_RATE'),
+            'NUM_EPOCHS': best_config.get('NUM_EPOCHS'),
+            'DROPOUT': best_config.get('DROPOUT'),
+            'USE_DISTANCE_FEATURE': best_config.get('USE_DISTANCE_FEATURE'),
+            'USE_POSITION_FEATURE': best_config.get('USE_POSITION_FEATURE'),
+            'ENTITY_CATEGORY_EMBEDDING_DIM': best_config.get('ENTITY_CATEGORY_EMBEDDING_DIM'),
+            'USE_WEIGHTED_LOSS': best_config.get('USE_WEIGHTED_LOSS', False),
+            'POS_WEIGHT': best_config.get('POS_WEIGHT')
+        }
+        
+        save_dict = {
+            'hyperparameters': serializable_config,
+            'model_state_dict': best_model_state,
+            'vocab_size': train_dataset.vocab.n_words,
+            'best_threshold': best_metrics['best_val_threshold']
+        }
+        
+        torch.save(save_dict, model_full_path)
+        print(f"Best model and config saved to: {model_full_path}")
         
         # Plot training curves for the best model only
         plot_save_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), 
