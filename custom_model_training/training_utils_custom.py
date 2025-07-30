@@ -16,6 +16,38 @@ from sklearn.metrics import f1_score, precision_score, recall_score
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+def find_best_f1_threshold(probs, labels, threshold_step=0.01):
+    """
+    Find the best F1 score by sweeping through different thresholds.
+    
+    Args:
+        probs (np.array): Array of probabilities from the model.
+        labels (np.array): Array of true labels.
+        threshold_step (float): The step size for sweeping thresholds.
+        
+    Returns:
+        tuple: (best_f1, best_precision, best_recall, best_accuracy, best_threshold)
+    """
+    best_f1 = 0
+    best_threshold = 0.5  # Default threshold
+    best_precision = 0
+    best_recall = 0
+    best_accuracy = 0
+    
+    # Sweep through a range of thresholds
+    for threshold in np.arange(0.1, 0.9, threshold_step):
+        preds = (probs >= threshold).astype(int)
+        f1 = f1_score(labels, preds, zero_division=0)
+        
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = threshold
+            best_precision = precision_score(labels, preds, zero_division=0)
+            best_recall = recall_score(labels, preds, zero_division=0)
+            best_accuracy = np.mean(preds == labels) * 100
+    
+    return best_f1, best_precision, best_recall, best_accuracy, best_threshold
+
 # Add a helper function to sanitize strings with datetime objects
 def sanitize_datetime_strings(s):
     """
@@ -332,6 +364,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
     val_f1s = []
     val_precisions = []
     val_recalls = []
+    val_thresholds = []  # Store the best threshold for each epoch
     best_val_f1 = 0
     best_model_state = None  # Store the best model state in memory
     
@@ -369,7 +402,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
         # Validation
         model.eval()
         val_loss = 0
-        all_preds = []
+        all_outputs = []  # Changed from all_preds to store raw outputs
         all_labels = []
         
         with torch.no_grad():
@@ -391,40 +424,42 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
                 
                 val_loss += loss.item()
                 
-                # Store predictions and labels for computing metrics
-                predicted = (outputs > 0.5).float()
-                all_preds.extend(predicted.cpu().numpy())
+                # Store raw outputs and labels for threshold sweeping
+                # If using BCEWithLogitsLoss, model outputs are logits. Apply sigmoid to get probabilities.
+                if isinstance(criterion, torch.nn.BCEWithLogitsLoss):
+                    probs = torch.sigmoid(outputs)
+                else:
+                    probs = outputs  # Assume model already outputs probabilities
+                
+                all_outputs.extend(probs.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
         
         val_loss /= len(val_loader)
         val_losses.append(val_loss)
         
-        # Calculate metrics
-        all_preds = np.array(all_preds)
+        # Calculate metrics with threshold sweeping
+        all_outputs = np.array(all_outputs)
         all_labels = np.array(all_labels)
         
-        # Calculate accuracy
-        correct = (all_preds == all_labels).sum()
-        total = len(all_labels)
-        val_acc = 100 * correct / total
+        # Find the best threshold and corresponding metrics
+        val_f1, val_precision, val_recall, val_acc, best_threshold = find_best_f1_threshold(all_outputs, all_labels)
+        
         val_accs.append(val_acc)
-        
-        # Calculate F1, precision, and recall
-        val_f1 = f1_score(all_labels, all_preds)
-        val_precision = precision_score(all_labels, all_preds, zero_division=0)
-        val_recall = recall_score(all_labels, all_preds)
-        
         val_f1s.append(val_f1)
         val_precisions.append(val_precision)
         val_recalls.append(val_recall)
+        val_thresholds.append(best_threshold)
         
         # Store the best model state in memory based on F1-score
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
             best_model_state = model.state_dict().copy()  # Create a copy of the state dict
-            print(f"New best validation F1-score found: {val_f1:.4f} (P: {val_precision:.4f}, R: {val_recall:.4f}, Acc: {val_acc:.2f}%)")
+            print(f"New best validation F1-score found: {val_f1:.4f} (at threshold {best_threshold:.2f}) (P: {val_precision:.4f}, R: {val_recall:.4f}, Acc: {val_acc:.2f}%)")
         
-        print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}, Val Acc: {val_acc:.2f}%')
+        print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f} (Thresh: {best_threshold:.2f}), Val Acc: {val_acc:.2f}%')
+    
+    # Find the index of the best F1 score
+    best_epoch_idx = val_f1s.index(best_val_f1)
     
     # Return metrics as a dictionary for logging
     metrics = {
@@ -434,23 +469,22 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, epochs, d
         'val_f1s': val_f1s,
         'val_precisions': val_precisions,
         'val_recalls': val_recalls,
+        'val_thresholds': val_thresholds,
         'best_val_f1': best_val_f1,
-        'best_val_acc': val_accs[val_f1s.index(best_val_f1)],  # Accuracy at best F1
-        'best_val_precision': val_precisions[val_f1s.index(best_val_f1)],  # Precision at best F1
-        'best_val_recall': val_recalls[val_f1s.index(best_val_f1)],  # Recall at best F1
+        'best_val_acc': val_accs[best_epoch_idx],
+        'best_val_precision': val_precisions[best_epoch_idx],
+        'best_val_recall': val_recalls[best_epoch_idx],
+        'best_val_threshold': val_thresholds[best_epoch_idx],
         'final_train_loss': train_losses[-1],
         'final_val_loss': val_losses[-1],
         'final_val_acc': val_accs[-1],
         'final_val_f1': val_f1s[-1],
         'final_val_precision': val_precisions[-1],
         'final_val_recall': val_recalls[-1],
+        'final_val_threshold': val_thresholds[-1],
         'epochs': epochs,
         'train_loss': train_losses[-1],  # For consistency with log_training_run
         'val_loss': val_losses[-1],      # For consistency with log_training_run
-        'val_acc': val_accs[-1],         # For consistency with log_training_run
-        'val_f1': val_f1s[-1],           # For consistency with log_training_run
-        'val_precision': val_precisions[-1],  # For consistency with log_training_run
-        'val_recall': val_recalls[-1]    # For consistency with log_training_run
     }
     
     return best_model_state, metrics

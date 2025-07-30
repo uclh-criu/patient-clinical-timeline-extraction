@@ -98,10 +98,11 @@ def log_training_run(model_path, hyperparams, metrics, dataset_name, entity_mode
         'dataset': dataset_name,
         'entity_mode': entity_mode,
         'model_filename': model_filename,
-        'val_accuracy': metrics.get('val_acc', 0),
-        'val_f1': metrics.get('val_f1', 0),
-        'val_precision': metrics.get('val_precision', 0),
-        'val_recall': metrics.get('val_recall', 0),
+        'val_accuracy': metrics.get('best_val_acc', 0),
+        'val_f1': metrics.get('best_val_f1', 0),
+        'val_precision': metrics.get('best_val_precision', 0),
+        'val_recall': metrics.get('best_val_recall', 0),
+        'val_threshold': metrics.get('best_val_threshold', 0.5),  # Add threshold to log
         'val_loss': metrics.get('val_loss', 0),
         'train_loss': metrics.get('train_loss', 0),
         'epochs': metrics.get('epochs', 0),
@@ -129,13 +130,14 @@ def log_training_run(model_path, hyperparams, metrics, dataset_name, entity_mode
     except Exception as e:
         print(f"Error logging training run: {e}")
 
-def plot_training_curves(metrics, save_path, show_plot=False):
+def plot_training_curves(metrics, save_path, title_suffix="", show_plot=False):
     """
     Plot training curves for model training.
     
     Args:
         metrics (dict): Dictionary containing training metrics (train_losses, val_losses, val_accs, val_f1s, etc.)
         save_path: Path to save the plot
+        title_suffix (str): Optional suffix to add to the plot titles
         show_plot: Whether to display the plot (default: False)
     """
     # Make sure the save path has a proper extension
@@ -143,8 +145,8 @@ def plot_training_curves(metrics, save_path, show_plot=False):
         # If no .png extension, add it
         save_path = save_path + '.png'
     
-    # Create a figure with subplots
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    # Create a figure with subplots - add an extra row for thresholds
+    fig, axes = plt.subplots(3, 2, figsize=(15, 15))
     
     # Plot losses
     train_losses = metrics['train_losses']
@@ -154,14 +156,14 @@ def plot_training_curves(metrics, save_path, show_plot=False):
     epochs = range(1, len(train_losses) + 1)
     axes[0, 0].plot(epochs, train_losses, 'b-', label='Training Loss')
     axes[0, 0].plot(epochs, val_losses, 'r-', label='Validation Loss')
-    axes[0, 0].set_title('Training and Validation Loss')
+    axes[0, 0].set_title(f'Training and Validation Loss{title_suffix}')
     axes[0, 0].set_xlabel('Epochs')
     axes[0, 0].set_ylabel('Loss')
     axes[0, 0].legend()
     
     # Plot accuracy
     axes[0, 1].plot(epochs, val_accs, 'g-')
-    axes[0, 1].set_title('Validation Accuracy')
+    axes[0, 1].set_title(f'Validation Accuracy{title_suffix}')
     axes[0, 1].set_xlabel('Epochs')
     axes[0, 1].set_ylabel('Accuracy (%)')
     
@@ -169,9 +171,18 @@ def plot_training_curves(metrics, save_path, show_plot=False):
     if 'val_f1s' in metrics:
         val_f1s = metrics['val_f1s']
         axes[1, 0].plot(epochs, val_f1s, 'm-')
-        axes[1, 0].set_title('Validation F1-Score')
+        axes[1, 0].set_title(f'Validation F1-Score{title_suffix}')
         axes[1, 0].set_xlabel('Epochs')
         axes[1, 0].set_ylabel('F1-Score')
+        
+        # Mark the best F1-score
+        best_epoch_idx = val_f1s.index(max(val_f1s))
+        best_f1 = val_f1s[best_epoch_idx]
+        axes[1, 0].plot(best_epoch_idx + 1, best_f1, 'ro', markersize=8)
+        axes[1, 0].annotate(f'Best: {best_f1:.4f}', 
+                           xy=(best_epoch_idx + 1, best_f1),
+                           xytext=(best_epoch_idx + 1 - 0.5, best_f1 + 0.05),
+                           fontsize=10)
     
     # Plot precision and recall if available
     if 'val_precisions' in metrics and 'val_recalls' in metrics:
@@ -179,12 +190,54 @@ def plot_training_curves(metrics, save_path, show_plot=False):
         val_recalls = metrics['val_recalls']
         axes[1, 1].plot(epochs, val_precisions, 'c-', label='Precision')
         axes[1, 1].plot(epochs, val_recalls, 'y-', label='Recall')
-        axes[1, 1].set_title('Validation Precision and Recall')
+        axes[1, 1].set_title(f'Validation Precision and Recall{title_suffix}')
         axes[1, 1].set_xlabel('Epochs')
         axes[1, 1].set_ylabel('Score')
         axes[1, 1].legend()
     
+    # Plot thresholds if available
+    if 'val_thresholds' in metrics:
+        val_thresholds = metrics['val_thresholds']
+        axes[2, 0].plot(epochs, val_thresholds, 'k-')
+        axes[2, 0].set_title(f'Best F1 Thresholds{title_suffix}')
+        axes[2, 0].set_xlabel('Epochs')
+        axes[2, 0].set_ylabel('Threshold')
+        axes[2, 0].set_ylim([0, 1])
+        
+        # Mark the best threshold
+        best_epoch_idx = val_f1s.index(max(val_f1s)) if 'val_f1s' in metrics else 0
+        best_threshold = val_thresholds[best_epoch_idx]
+        axes[2, 0].plot(best_epoch_idx + 1, best_threshold, 'ro', markersize=8)
+        axes[2, 0].annotate(f'Best: {best_threshold:.2f}', 
+                           xy=(best_epoch_idx + 1, best_threshold),
+                           xytext=(best_epoch_idx + 1 - 0.5, best_threshold + 0.05),
+                           fontsize=10)
+    
+    # Keep the last subplot empty or use it for additional information
+    axes[2, 1].axis('off')  # Turn off axis
+    
+    # Add a text box with key metrics
+    if 'best_val_f1' in metrics:
+        best_f1 = metrics['best_val_f1']
+        best_precision = metrics.get('best_val_precision', 0)
+        best_recall = metrics.get('best_val_recall', 0)
+        best_acc = metrics.get('best_val_acc', 0)
+        best_threshold = metrics.get('best_val_threshold', 0.5)
+        
+        info_text = (f"Best F1-Score: {best_f1:.4f}\n"
+                    f"Precision: {best_precision:.4f}\n"
+                    f"Recall: {best_recall:.4f}\n"
+                    f"Accuracy: {best_acc:.2f}%\n"
+                    f"Threshold: {best_threshold:.2f}")
+        
+        axes[2, 1].text(0.1, 0.5, info_text, fontsize=12,
+                      bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8))
+    
     plt.tight_layout()
+    
+    # Add overall title
+    fig.suptitle(f'Training Metrics{title_suffix}', fontsize=16)
+    plt.subplots_adjust(top=0.92)  # Make room for the suptitle
     
     # Ensure directory exists before saving plot
     os.makedirs(os.path.dirname(save_path), exist_ok=True)

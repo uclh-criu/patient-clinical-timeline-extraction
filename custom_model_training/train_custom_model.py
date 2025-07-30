@@ -35,7 +35,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         labels_info: Dictionary with label statistics
         
     Returns:
-        tuple: (best_val_f1, best_model_state, metrics, model_name)
+        tuple: (best_val_f1, best_model_state, metrics, model_name, config)
     """
     print(f"\n{'='*80}")
     print(f"Training with configuration:")
@@ -102,13 +102,6 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         config['NUM_EPOCHS'], DEVICE
     )
     
-    # Plot training curves
-    output_dir = os.path.join(project_root, os.path.dirname(MODEL_PATH))
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    plot_save_path = os.path.join(output_dir, f"{os.path.splitext(model_name)[0]}_training_curves")
-    plot_training_curves(metrics, plot_save_path)
-    
     # Collect hyperparameters for logging
     hyperparams = {
         'ENTITY_MODE': entity_mode,
@@ -130,7 +123,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         'positive_examples_pct': labels_info['positive_pct']
     }
     
-    # Log the training run
+    # Log the training run to CSV (but don't save model or plots yet)
     model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), model_name)
     log_training_run(
         model_full_path, 
@@ -142,7 +135,8 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         'custom_model_training_log.csv'
     )
     
-    return metrics['best_val_f1'], best_model_state, metrics, model_name
+    # Return metrics, model state, and config for later use
+    return metrics['best_val_f1'], best_model_state, metrics, model_name, config
 
 def train():
     print(f"Using device: {DEVICE}")
@@ -288,7 +282,7 @@ def train():
     start_time = time.time()
     for i, config in enumerate(hyperparameter_grid):
         print(f"\nTraining run {i+1}/{len(hyperparameter_grid)}")
-        val_f1, model_state, metrics, model_name = train_with_config(
+        val_f1, model_state, metrics, model_name, run_config = train_with_config(
             config, train_dataset, val_dataset, train_features, val_features, labels_info
         )
         
@@ -296,11 +290,11 @@ def train():
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
             best_model_state = model_state
-            best_config = config
+            best_config = run_config
             best_metrics = metrics
             best_model_name = model_name
             print(f"\n*** New best model found with validation F1-score: {best_val_f1:.4f} ***")
-            print(f"   Precision: {metrics['best_val_precision']:.4f}, Recall: {metrics['best_val_recall']:.4f}, Accuracy: {metrics['best_val_acc']:.2f}%")
+            print(f"   Precision: {metrics['best_val_precision']:.4f}, Recall: {metrics['best_val_recall']:.4f}, Accuracy: {metrics['best_val_acc']:.2f}%, Threshold: {metrics['best_val_threshold']:.2f}")
     
     # Print summary of grid search
     elapsed_time = time.time() - start_time
@@ -310,6 +304,7 @@ def train():
     print(f"Best validation Precision: {best_metrics['best_val_precision']:.4f}")
     print(f"Best validation Recall: {best_metrics['best_val_recall']:.4f}")
     print(f"Best validation Accuracy: {best_metrics['best_val_acc']:.2f}%")
+    print(f"Best F1 Threshold: {best_metrics['best_val_threshold']:.2f}")
     
     # Save the best model once at the end of the grid search
     if best_model_state is not None:
@@ -318,6 +313,23 @@ def train():
         os.makedirs(os.path.dirname(model_full_path), exist_ok=True)
         torch.save(best_model_state, model_full_path)
         print(f"Best model saved to: {model_full_path}")
+        
+        # Plot training curves for the best model only
+        plot_save_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), 
+                                     f"{os.path.splitext(best_model_name)[0]}_training_curves")
+        
+        # Add title suffix indicating if weighted loss was used
+        title_suffix = ""
+        if best_config.get('USE_WEIGHTED_LOSS', False):
+            pos_weight = best_config.get('POS_WEIGHT', None)
+            if pos_weight is None and 'positive' in labels_info and 'negative' in labels_info:
+                pos_weight = labels_info['negative'] / max(1, labels_info['positive'])
+            
+            if pos_weight is not None:
+                title_suffix = f" (Weighted Loss, w={pos_weight:.2f})"
+        
+        # Plot training curves for the best model
+        plot_training_curves(best_metrics, plot_save_path, title_suffix=title_suffix)
     
     print(f"Best hyperparameters:")
     for key, value in best_config.items():
