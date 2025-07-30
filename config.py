@@ -3,12 +3,12 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used for inference, evaluation, and timeline generation.
 # Valid options: 'imaging', 'synthetic', 'synthetic_multi', 'nph'
-DATA_SOURCE = 'synthetic'
+DATA_SOURCE = 'synthetic_multi'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to use for the relation extraction task.
 # Valid options: 'diagnosis_only', 'multi_entity'
-ENTITY_MODE = "diagnosis_only"
+ENTITY_MODE = "multi_entity"
 
 # --- Execution Settings --- #
 # Controls the extraction method to use for the relation extraction task.
@@ -40,8 +40,8 @@ UMLS_COLUMN = 'extracted_umls_entities'             # Used in multi_entity mode
 PROXIMITY_MAX_DISTANCE = 200  
 
 # --- Custom Extractor Parameters --- #
-MODEL_PATH = 'custom_model_training/models/synthetic_custom.pt'  
-VOCAB_PATH = 'custom_model_training/vocabs/synthetic_vocab.pt'
+MODEL_PATH = 'custom_model_training/models/nph_custom.pt'  
+VOCAB_PATH = 'custom_model_training/vocabs/nph_vocab.pt'
 PREDICTION_MAX_DISTANCE = 500 # Max char distance used by custom_extractor when finding candidate pairs
 PREDICTION_MAX_CONTEXT_LEN = 512 # Max sequence length used by custom_extractor when creating input tensors
 CUSTOM_CONFIDENCE_THRESHOLD = 0.5 # Confidence threshold for custom model predictions

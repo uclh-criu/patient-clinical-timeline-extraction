@@ -64,9 +64,17 @@ class NaiveExtractor(BaseRelationExtractor):
                 entity_pos = entity.get('start', 0)
                 entity_category = entity.get('category', 'unknown')
             else:
-                # Legacy format: (label, position)
-                entity_label, entity_pos = entity
-                entity_category = 'disorder'  # Default category for legacy format
+                # Handle both tuple formats: (label, position) or (label, position, category)
+                if len(entity) == 2:
+                    # Legacy format: (label, position)
+                    entity_label, entity_pos = entity
+                    entity_category = 'disorder'  # Default category for legacy format
+                elif len(entity) == 3:
+                    # Multi-entity format: (label, position, category)
+                    entity_label, entity_pos, entity_category = entity
+                else:
+                    print(f"Warning: Unexpected entity format: {entity}. Skipping.")
+                    continue
             
             closest_date = None
             min_distance = float('inf')

@@ -7,9 +7,9 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  # Device 
 # Note: You can provide a single value for each parameter, or a list of values to trigger grid search
 # Example: LEARNING_RATE = [0.001, 0.0005] will train models with both learning rates
 
-ENTITY_MODE = 'diagnosis_only'  # Entity mode: 'diagnosis_only' or 'multi_entity'
-TRAINING_DATA_PATH = 'data/synthetic.csv'  # Path to training data
-VOCAB_PATH = 'custom_model_training/vocabs/synthetic_vocab.pt'  # Path to vocabulary file for this dataset
+ENTITY_MODE = 'multi_entity'  # Entity mode: 'diagnosis_only' or 'multi_entity'
+TRAINING_DATA_PATH = 'data/nph.csv'  # Path to training data
+VOCAB_PATH = 'custom_model_training/vocabs/nph_vocab.pt'  # Path to vocabulary file for this dataset
 MAX_DISTANCE = 200 # Maximum distance between diagnosis and date to consider
 MAX_CONTEXT_LEN = [32, 64, 128]  # Maximum context length for text window around entities
 VOCAB_SIZE = 8000  # Maximum vocabulary size
@@ -38,4 +38,4 @@ POS_WEIGHT = None  # None = auto-calculate, or set a specific value (e.g., 13.5)
 # --- Grid Search Configuration --- #
 # Set ENABLE_GRID_SEARCH to False to use only the first value in each list
 # When True, all combinations of hyperparameters will be tested
-ENABLE_GRID_SEARCH = False
+ENABLE_GRID_SEARCH = True
