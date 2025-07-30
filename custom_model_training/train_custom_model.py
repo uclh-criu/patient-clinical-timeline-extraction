@@ -6,11 +6,14 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import time
+import random
+import numpy as np
 
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import DEVICE, MODEL_PATH, VOCAB_PATH, TRAINING_SET_RATIO, DATA_SPLIT_RANDOM_SEED
+from config import DEVICE, MODEL_PATH, TRAINING_SET_RATIO, DATA_SPLIT_RANDOM_SEED
+from custom_model_training.training_config_custom import VOCAB_PATH
 from utils.inference_eval_utils import load_and_prepare_data
 from utils.training_utils import generate_hyperparameter_grid, log_training_run, plot_training_curves
 import config as main_config
@@ -21,6 +24,22 @@ from custom_model_training.training_utils_custom import prepare_custom_training_
 
 # Get the project root directory
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def set_random_seeds(seed=42):
+    """
+    Set random seeds for reproducibility across all libraries used in training.
+    
+    Args:
+        seed (int): The random seed to use (default: 42)
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print(f"Random seeds set to {seed} for reproducibility")
 
 def train_with_config(config, train_dataset, val_dataset, train_features, val_features, labels_info):
     """
@@ -124,7 +143,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
     }
     
     # Log the training run to CSV (but don't save model or plots yet)
-    model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), model_name)
+    model_full_path = os.path.join(project_root, 'custom_model_training/models', model_name)
     log_training_run(
         model_full_path, 
         hyperparams, 
@@ -140,6 +159,9 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
 
 def train():
     print(f"Using device: {DEVICE}")
+    
+    # Set random seeds for reproducibility
+    set_random_seeds(DATA_SPLIT_RANDOM_SEED)
     
     # Generate hyperparameter grid
     print("Generating hyperparameter grid for training...")
@@ -308,7 +330,7 @@ def train():
     
     # Save the best model once at the end of the grid search
     if best_model_state is not None:
-        model_full_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), best_model_name)
+        model_full_path = os.path.join(project_root, 'custom_model_training/models', best_model_name)
         # Ensure directory exists before saving
         os.makedirs(os.path.dirname(model_full_path), exist_ok=True)
         
@@ -342,7 +364,7 @@ def train():
         print(f"Best model and config saved to: {model_full_path}")
         
         # Plot training curves for the best model only
-        plot_save_path = os.path.join(project_root, os.path.dirname(MODEL_PATH), 
+        plot_save_path = os.path.join(project_root, 'custom_model_training/plots', 
                                      f"{os.path.splitext(best_model_name)[0]}_training_curves")
         
         # Add title suffix indicating if weighted loss was used

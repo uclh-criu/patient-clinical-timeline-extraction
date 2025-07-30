@@ -1,0 +1,3 @@
+.env
+data/processed_notes_with_dates_and_disorders_imaging_labelled.csv
+data/synthetic_results_final.csv

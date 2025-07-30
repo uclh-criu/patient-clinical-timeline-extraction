@@ -125,10 +125,10 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
             # If training_config_custom can't be imported, use the default or existing value
             if not hasattr(config, 'ENTITY_MODE'):
                 setattr(config, 'ENTITY_MODE', 'diagnosis_only')
-                
+        
         if not hasattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION'):
             setattr(config, 'ENABLE_RELATIVE_DATE_EXTRACTION', False)
-            
+        
         # Handle different return signatures based on ENTITY_MODE
         try:
             result = canonical_load(dataset_path_or_data, None, config, data_split_mode=data_split_mode)

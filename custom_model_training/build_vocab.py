@@ -13,21 +13,32 @@ sys.path.append(project_root)
 from custom_model_training.Vocabulary import Vocabulary
 import custom_model_training.training_config_custom as training_config
 from utils.inference_eval_utils import preprocess_text
-from config import VOCAB_PATH
 
 def build_vocabulary():
     """
     Build a vocabulary from the data specified in TRAINING_DATA_PATH in training_config.py
-    and save it to the path specified in config.py.
+    and save it to a file named based on the dataset name.
     """
     print("Building vocabulary from training data source...")
     
+    # Get the training data path
+    training_data_path = training_config.TRAINING_DATA_PATH
+    
+    # Extract the dataset name from the path (without extension)
+    dataset_name = os.path.splitext(os.path.basename(training_data_path))[0]
+    
+    # Create a vocabulary path based on the dataset name
+    vocab_filename = f"vocab_{dataset_name}.pt"
+    vocab_dir = os.path.join(project_root, "custom_model_training", "vocabs")
+    vocab_full_path = os.path.join(vocab_dir, vocab_filename)
+    
     # Ensure the output directory exists
-    vocab_full_path = os.path.join(project_root, VOCAB_PATH)
-    os.makedirs(os.path.dirname(vocab_full_path), exist_ok=True)
+    os.makedirs(vocab_dir, exist_ok=True)
+    
+    print(f"Will save vocabulary to: {vocab_full_path}")
     
     # Load the vocabulary data
-    vocab_data_path = os.path.join(project_root, training_config.TRAINING_DATA_PATH)
+    vocab_data_path = os.path.join(project_root, training_data_path)
     
     if not os.path.exists(vocab_data_path):
         print(f"Error: Training data file not found at {vocab_data_path}")
@@ -63,6 +74,12 @@ def build_vocabulary():
     torch.save(vocab, vocab_full_path)
     print(f"Vocabulary built successfully with {vocab.n_words} unique words")
     print(f"Saved vocabulary to: {vocab_full_path}")
+    
+    # Print a message instructing the user to update the training_config
+    print("\n" + "="*80)
+    print(f"IMPORTANT: To use this vocabulary for training, add the following line to training_config_custom.py:")
+    print(f"VOCAB_PATH = 'custom_model_training/vocabs/{vocab_filename}'")
+    print("="*80)
     
     # Print some statistics about the vocabulary
     print("\nVocabulary Statistics:")

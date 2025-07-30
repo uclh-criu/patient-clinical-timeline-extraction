@@ -32,7 +32,14 @@ class CustomExtractor(BaseRelationExtractor):
         self.device = config.DEVICE
         self.name = "Custom (PyTorch NN)"
         self.debug = getattr(config, 'MODEL_DEBUG_MODE', False)
-        self.threshold = 0.5  # Default threshold, will be updated from saved model if available
+        self.threshold = getattr(config, 'CUSTOM_CONFIDENCE_THRESHOLD', 0.5)
+        
+        # Track all unique entity categories seen during extraction
+        self.seen_categories = set()
+        self.seen_raw_to_normalized = {}  # Track raw to normalized category mappings
+        
+        # Use the centralized category mappings from config
+        self.category_mapping = config.CATEGORY_MAPPINGS
         
         self.model = None
         self.vocab = None 
@@ -82,6 +89,8 @@ class CustomExtractor(BaseRelationExtractor):
                 if 'best_threshold' in checkpoint:
                     self.threshold = checkpoint['best_threshold']
                     print(f"Using optimal threshold from saved model: {self.threshold:.2f}")
+                else:
+                    print(f"No threshold found in model file. Using default threshold: {self.threshold:.2f}")
                 
                 # Initialize model with saved hyperparameters
                 self.model = DiagnosisDateRelationModel(
@@ -224,6 +233,11 @@ class CustomExtractor(BaseRelationExtractor):
         
         entities_list, dates = entities
         
+        # Collect unique entity categories for later analysis
+        for entity in entities_list:
+            if isinstance(entity, tuple) and len(entity) > 2:
+                self.seen_categories.add(entity[2])
+        
         # Convert the new entity format to the format expected by the model
         diagnoses = []
         for entity in entities_list:
@@ -244,10 +258,24 @@ class CustomExtractor(BaseRelationExtractor):
                 entity_category = entity[2] if len(entity) > 2 else 'disorder'
                 diagnoses.append((entity_label, entity_pos, entity_category))
         
+        # Process dates to ensure they are in the correct format
+        formatted_dates = []
+        for date in dates:
+            if isinstance(date, tuple) and len(date) >= 3:
+                # Already in correct format: (parsed_date, original_date, position)
+                formatted_dates.append(date)
+            elif isinstance(date, tuple) and len(date) == 2:
+                # Tuple with just (parsed_date, position)
+                parsed_date, position = date
+                formatted_dates.append((parsed_date, parsed_date, position))
+            elif isinstance(date, str):
+                # Just a string, assume it's both parsed and original, with position 0
+                formatted_dates.append((date, date, 0))
+        
         # Extract just the position information needed for preprocess_note_for_prediction
         diagnoses_for_model = [(d[0], d[1]) for d in diagnoses]
         
-        features = preprocess_note_for_prediction(text, diagnoses_for_model, dates, self.pred_max_distance)
+        features = preprocess_note_for_prediction(text, diagnoses_for_model, formatted_dates, self.pred_max_distance)
         
         # Pass the confirmed lists to the next function
         test_data = create_prediction_dataset(features, self.vocab, self.device, 
@@ -269,20 +297,41 @@ class CustomExtractor(BaseRelationExtractor):
                 # Find the corresponding entity category
                 entity_category = 'disorder'  # Default
                 entity_category_id = 0  # Default to diagnosis (0)
-                for entity_label, _, category in diagnoses:
+                for entity_label, _, raw_category in diagnoses:
                     if entity_label == diagnosis:
-                        entity_category = category
-                        # Map category string to ID
-                        if category.lower() in ['symptom', 'symptoms', 'finding']:
+                        # Map the raw category to one of our four simplified categories
+                        raw_category_lower = raw_category.lower()
+                        
+                        # Use the mapping dictionary to normalize the category
+                        if raw_category_lower in self.category_mapping:
+                            normalized_category = self.category_mapping[raw_category_lower]
+                        else:
+                            # Default to 'diagnosis' for unknown categories
+                            normalized_category = 'diagnosis'
+                            
+                        # Track the mapping for debugging
+                        if raw_category_lower not in self.seen_raw_to_normalized:
+                            self.seen_raw_to_normalized[raw_category_lower] = normalized_category
+                            
+                        entity_category = raw_category
+                        
+                        # Map normalized category to ID
+                        if normalized_category == 'symptom':
                             entity_category_id = 1
-                        elif category.lower() in ['procedure', 'treatment']:
+                        elif normalized_category == 'procedure':
                             entity_category_id = 2
-                        elif category.lower() in ['medication', 'drug']:
+                        elif normalized_category == 'medication':
                             entity_category_id = 3
+                        else:  # Default to diagnosis
+                            entity_category_id = 0
                         break
                 
                 # Convert to tensor
                 entity_category_tensor = torch.tensor([entity_category_id], dtype=torch.long, device=self.device)
+                
+                # Track the mapping of raw category to ID for later analysis
+                if entity_category not in self.seen_categories:
+                    self.seen_categories.add(entity_category)
                 
                 # Pass entity category to model
                 try:
@@ -290,7 +339,15 @@ class CustomExtractor(BaseRelationExtractor):
                 except Exception:
                     # Fallback if entity_category is not supported
                     output = self.model(data['context'], data['distance'], data['diag_before'])
-                prob = output.item()
+                
+                # Check if we need to apply sigmoid (if model is configured to output raw logits)
+                if hasattr(self.model, 'apply_sigmoid') and not self.model.apply_sigmoid:
+                    import torch.nn.functional as F
+                    prob = F.sigmoid(output).item()
+                    #if self.debug:
+                        #print(f"Applied sigmoid to raw logit {output.item():.4f} -> probability {prob:.4f}")
+                else:
+                    prob = output.item()
                 
                 prediction_count += 1
                 
@@ -316,8 +373,8 @@ class CustomExtractor(BaseRelationExtractor):
         # For each entity, select the date with the highest confidence
         relationships = []
         
-        if self.debug:
-            print("\n===== DIAGNOSTIC: FINAL RELATIONSHIP SELECTIONS =====")
+        # Disable verbose diagnostic output as we now have a unified output format
+        # in the run_extraction function
         
         for entity_key, predictions in entity_predictions.items():
             if predictions:
@@ -329,14 +386,6 @@ class CustomExtractor(BaseRelationExtractor):
                 
                 # Only include predictions that meet the threshold
                 if best_prediction['confidence'] >= self.threshold:
-                    # DIAGNOSTIC: Print the best prediction for each entity
-                    if self.debug:
-                        print(f"Entity: '{entity_label}' ({entity_category})")
-                        print(f"  Best date: '{best_prediction['date']}' with confidence: {best_prediction['confidence']:.4f}")
-                        print(f"  Threshold: {self.threshold:.2f}")
-                        if len(predictions) > 1:
-                            print(f"  (Selected from {len(predictions)} candidate dates)")
-                    
                     # Add the best prediction to our results
                     relationships.append({
                         'entity_label': entity_label,
@@ -344,11 +393,6 @@ class CustomExtractor(BaseRelationExtractor):
                         'date': best_prediction['date'],
                         'confidence': best_prediction['confidence']
                     })
-                elif self.debug:
-                    print(f"Entity: '{entity_label}' ({entity_category})")
-                    print(f"  Rejected: confidence {best_prediction['confidence']:.4f} below threshold {self.threshold:.2f}")
-        
-        if self.debug:
-            print("\n===== END OF DIAGNOSTIC OUTPUT =====\n")
+                # We no longer need to print rejected predictions here
         
         return relationships 

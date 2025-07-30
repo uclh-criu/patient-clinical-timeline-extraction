@@ -3,7 +3,7 @@ import sys
 import torch
 
 # Add project root to path to allow importing from other directories
-project_root = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
 from extractors.custom_extractor import CustomExtractor

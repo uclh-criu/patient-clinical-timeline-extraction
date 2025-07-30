@@ -187,6 +187,7 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
     
     text_column = config.TEXT_COLUMN
     patient_id_column = getattr(config, 'PATIENT_ID_COLUMN', None)
+    note_id_column = getattr(config, 'NOTE_ID_COLUMN', None)
     
     # Get column names for gold standards
     entity_gold_col = getattr(config, 'ENTITY_GOLD_COLUMN', None)
@@ -294,8 +295,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
                                 # Handle both formats: direct entity-date pairs or date-diagnoses structure
                                 if 'entity_label' in entry and 'date' in entry:
                                     # Direct entity-date pair
+                                    note_id = row.get(note_id_column) if note_id_column and note_id_column in df.columns else i
                                     relationship_gold.append({
-                                        'note_id': i,
+                                        'note_id': note_id,
                                         'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                         'entity_label': str(entry['entity_label']).lower(),
                                         'entity_category': str(entry.get('entity_category', 'disorder')).lower(),
@@ -303,8 +305,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
                                     })
                                 elif 'diagnosis' in entry and 'date' in entry:
                                     # Legacy direct diagnosis-date pair
+                                    note_id = row.get(note_id_column) if note_id_column and note_id_column in df.columns else i
                                     relationship_gold.append({
-                                        'note_id': i,
+                                        'note_id': note_id,
                                         'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                         'entity_label': str(entry['diagnosis']).lower(),
                                         'entity_category': 'disorder',  # Default for legacy format
@@ -332,8 +335,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
                                 diagnoses = entry.get('diagnoses', [])
                                 for diag in diagnoses:
                                     if 'diagnosis' in diag:
+                                        note_id = row.get(note_id_column) if note_id_column and note_id_column in df.columns else i
                                         relationship_gold.append({
-                                            'note_id': i,
+                                            'note_id': note_id,
                                             'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                             'entity_label': str(diag['diagnosis']).lower(),
                                                 'entity_category': 'disorder',  # Default for legacy format
@@ -356,8 +360,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
                                         print(f"Warning: Could not normalize date '{date_str}' in legacy gold standard for row {i}. Using as-is.")
                                         normalized_date = date_str
 
+                                    note_id = row.get(note_id_column) if note_id_column and note_id_column in df.columns else i
                                     relationship_gold.append({
-                                        'note_id': i,
+                                        'note_id': note_id,
                                         'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                         'entity_label': str(rel['diagnosis']).lower(),
                                         'entity_category': 'disorder',  # Default for legacy format
@@ -389,8 +394,9 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
                         
                         # Process each entity in the gold standard
                         for entity in gold_json:
+                            note_id = row.get(note_id_column) if note_id_column and note_id_column in df.columns else i
                             entity_gold.append({
-                                'note_id': i,
+                                'note_id': note_id,
                                 'patient_id': row.get(patient_id_column) if patient_id_column else None,
                                 'entity_label': str(entity.get('entity_label', '')).lower(),
                                 'entity_category': str(entity.get('entity_category', 'unknown')).lower(),
@@ -554,13 +560,14 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
                         except Exception as e:
                             print(f"Error parsing UMLS entities for row {i}: {e}")
                 
-                # Convert the full entity dicts to the (label, start_pos) tuple format
+                # Convert the full entity dicts to the (label, start_pos, category) tuple format
                 # required by the downstream relationship extraction models.
                 for entity in all_extracted_entities:
                     label = entity.get('label', '')
                     start_pos = entity.get('start', 0)
+                    category = entity.get('category', 'disorder').lower()  # Get category, default to 'disorder' if missing
                     if label:
-                        entities_list_for_rel_extraction.append((label.lower(), start_pos))
+                        entities_list_for_rel_extraction.append((label.lower(), start_pos, category))
                 
                 # Process dates
                 if dates_column and dates_column in df.columns:
@@ -606,8 +613,10 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
             
             # Note: Relative date extraction is now handled by extract_relative_dates.py
             # Add the prepared data entry - MOVED OUTSIDE THE IF/ELSE BLOCK
+            # Use the note_id from the data if available, otherwise fall back to the row index
+            note_id = row.get(note_id_column) if note_id_column and note_id_column in df.columns else i
             prepared_test_data.append({
-                'note_id': i,
+                'note_id': note_id,
                 'patient_id': row.get(patient_id_column) if patient_id_column else None,
                 'note': text,
                 'entities': entities,
@@ -639,7 +648,7 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
     
     Args:
         note (str): The clinical note text
-        diagnoses (list): List of (diagnosis, position) tuples
+        diagnoses (list): List of (diagnosis, position) tuples or (diagnosis, position, category) tuples
         dates (list): List of (parsed_date, original_date, position) tuples
         MAX_DISTANCE (int): Maximum distance between diagnosis and date to consider
         
@@ -660,7 +669,14 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
     pairs_considered = 0
     pairs_within_distance = 0
     
-    for diagnosis, diag_pos in diagnoses:
+    for entity_tuple in diagnoses:
+        # Handle both 2-part (diagnosis, position) and 3-part (diagnosis, position, category) tuples
+        if len(entity_tuple) == 3:
+            diagnosis, diag_pos, entity_category = entity_tuple
+        else:
+            diagnosis, diag_pos = entity_tuple
+            entity_category = 'diagnosis'  # Default category
+        
         # Correctly unpack the 3-element tuple from the dates list
         for parsed_date, date_str, date_pos in dates:
             pairs_considered += 1
@@ -680,6 +696,7 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
             if debug_mode and pairs_within_distance <= 3:  # Only print first 3 for brevity
                 print(f"\n--- Candidate Pair {pairs_within_distance} ---")
                 print(f"Diagnosis: '{diagnosis}' at position {diag_pos}")
+                print(f"Entity Category: '{entity_category}'")
                 print(f"Date: Original='{date_str}', Parsed='{parsed_date}' at position {date_pos}")
                 print(f"Distance: {distance} words")
                 print(f"Diagnosis before date: {'Yes' if diag_pos < date_pos else 'No'}")
@@ -695,7 +712,8 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
                 'distance': distance,
                 'diag_pos_rel': diag_pos - start_pos,
                 'date_pos_rel': date_pos - start_pos,
-                'diag_before_date': 1 if diag_pos < date_pos else 0
+                'diag_before_date': 1 if diag_pos < date_pos else 0,
+                'entity_category': entity_category  # Add entity category to features
             }
             features.append(feature)
     
@@ -812,17 +830,17 @@ def create_prediction_dataset(features, vocab, device, max_distance, max_context
         test_data.append(tensor_dict)
     
     # DIAGNOSTIC: Print combined vectorization parameters and summary statistics
-    if debug_mode:
-        print("\n===== DIAGNOSTIC: CREATE_PREDICTION_DATASET =====")
-        print(f"Vocabulary size: {vocab.n_words}")
-        print(f"Max context length: {max_context_len}")
-        print(f"Max distance for normalization: {max_distance}")
-        print(f"Device: {device}")
-        print(f"Total features processed: {len(features)}")
-        print(f"Total words processed: {total_words_count}")
-        print(f"Unknown words encountered: {unknown_words_count} ({unknown_words_count/total_words_count*100:.1f}% of total)")
-        print(f"Test data tensors created: {len(test_data)}")
-        print("==========================================================\n")
+    #if debug_mode:
+        #print("\n===== DIAGNOSTIC: CREATE_PREDICTION_DATASET =====")
+        #print(f"Vocabulary size: {vocab.n_words}")
+        #print(f"Max context length: {max_context_len}")
+        #print(f"Max distance for normalization: {max_distance}")
+        #print(f"Device: {device}")
+        #print(f"Total features processed: {len(features)}")
+        #print(f"Total words processed: {total_words_count}")
+        #print(f"Unknown words encountered: {unknown_words_count} ({unknown_words_count/total_words_count*100:.1f}% of total)")
+        #print(f"Test data tensors created: {len(test_data)}")
+        #print("==========================================================\n")
     
     return test_data
 
@@ -859,13 +877,15 @@ def predict_relationships(model, test_data):
     return relationships
 
 # Helper function to run extraction process for a given extractor and data
-def run_extraction(extractor, prepared_test_data):
+def run_extraction(extractor, prepared_test_data, gold_standard=None, dataset_path=None):
     """
     Runs the extraction process for a given extractor on prepared data.
 
     Args:
         extractor: An initialized and loaded extractor object (subclass of BaseExtractor).
         prepared_test_data (list): List of dicts {'patient_id': ..., 'note_id': ..., 'note': ..., 'entities': ...}.
+        gold_standard (list, optional): List of gold standard relationships for comparison.
+        dataset_path (str, optional): Path to the dataset file to load note texts.
 
     Returns:
         list: List of predicted relationships [{'note_id': ..., 'patient_id': ..., 'entity_label': ..., 'entity_category': ..., 'date': ..., 'confidence': ...}]
@@ -875,15 +895,43 @@ def run_extraction(extractor, prepared_test_data):
     all_predictions = []
     skipped_rels = 0
     
-    # Determine if we're in disorder_only mode based on the extractor name
-    # This is a heuristic - we assume extractors with 'naive', 'custom', or 'relcat' in their name
-    # are older extractors that use the 'diagnosis' field instead of 'entity_label'
-    disorder_only_extractors = ['naive', 'custom', 'relcat']
-    disorder_only_mode = any(name.lower() in extractor.name.lower() for name in disorder_only_extractors)
+    # Determine if we're in disorder_only mode based on the entity_mode in config
+    # rather than assuming based on extractor name
+    if hasattr(extractor, 'config') and hasattr(extractor.config, 'ENTITY_MODE'):
+        disorder_only_mode = extractor.config.ENTITY_MODE.lower() == 'diagnosis_only'
+    else:
+        # Fallback to the old heuristic for backward compatibility
+        disorder_only_extractors = ['naive']  # Removed 'custom' and 'relcat' as they can handle multi-entity
+        disorder_only_mode = any(name.lower() in extractor.name.lower() for name in disorder_only_extractors)
+    
+    # Load note texts if gold standard and dataset path are provided
+    note_texts = {}
+    gold_by_note_id = {}
+    
+    if gold_standard and dataset_path:
+        # Group gold standard by note_id for easier lookup
+        for g in gold_standard:
+            note_id = g.get('note_id')
+            if note_id not in gold_by_note_id:
+                gold_by_note_id[note_id] = []
+            gold_by_note_id[note_id].append(g)
+        
+        # Load note texts
+        try:
+            import pandas as pd
+            df = pd.read_csv(dataset_path)
+            if 'note' in df.columns:
+                for i, row in df.iterrows():
+                    note_id = row.get('note_id', i)  # Use note_id column if available, otherwise use index
+                    note_texts[note_id] = row['note']
+        except Exception as e:
+            print(f"Warning: Could not load note texts from dataset: {e}")
     
     for note_entry in tqdm(prepared_test_data, desc=f"Processing with {extractor.name}", unit="note"):
         note_id = note_entry['note_id']
         patient_id = note_entry['patient_id']
+        note_predictions = []
+        
         try:
             # Extract relationships using the provided extractor
             relationships = extractor.extract(note_entry['note'], entities=note_entry['entities'], 
@@ -925,27 +973,97 @@ def run_extraction(extractor, prepared_test_data):
                 date_str = str(date_str).strip() # Ensure string and strip whitespace
 
                 if date_str and normalized_entity:
+                    # Apply category mapping if available
+                    mapped_category = entity_category
+                    if hasattr(extractor, 'category_mapping') and entity_category in extractor.category_mapping:
+                        mapped_category = extractor.category_mapping[entity_category]
+                        # Track the mapping for reporting
+                        if hasattr(extractor, 'seen_raw_to_normalized'):
+                            extractor.seen_raw_to_normalized[entity_category] = mapped_category
+                    
                     # Create prediction in the appropriate format based on the mode
                     if disorder_only_mode:
-                        all_predictions.append({
+                        prediction = {
                             'note_id': note_id,
                             'patient_id': patient_id,
                             'diagnosis': normalized_entity,
                             'date': date_str,
-                            'confidence': rel.get('confidence', 1.0) # Default confidence to 1.0 if missing
-                        })
+                            'confidence': rel.get('confidence', 1.0), # Default confidence to 1.0 if missing
+                            'original_category': entity_category,
+                            'mapped_category': mapped_category
+                        }
                     else:
-                        all_predictions.append({
+                        prediction = {
                             'note_id': note_id,
                             'patient_id': patient_id,
                             'entity_label': normalized_entity,
-                            'entity_category': entity_category,
+                            'entity_category': mapped_category,  # Use the mapped category
+                            'original_category': entity_category,  # Store the original category for reference
                             'date': date_str,
                             'confidence': rel.get('confidence', 1.0) # Default confidence to 1.0 if missing
-                        })
+                        }
+                    
+                    all_predictions.append(prediction)
+                    note_predictions.append(prediction)
                 else:
                     # Log if validation failed
                     skipped_rels += 1
+            
+            # Print a unified output for this note if gold standard is available
+            if gold_standard and note_id in gold_by_note_id and note_id in note_texts:
+                note_text = note_texts[note_id]
+                note_gold = gold_by_note_id[note_id]
+                
+                # Print a concise summary for this note
+                print(f"\n[Note ID: {note_id}]")
+                
+                # Print note text preview
+                note_preview = note_text[:50] + "..." if len(note_text) > 50 else note_text
+                print(f"NOTE TEXT: {note_preview}")
+                
+                # Print gold standard
+                print("GOLD STANDARD:")
+                if note_gold:
+                    for g in note_gold:
+                        entity = g.get('entity_label', g.get('diagnosis', 'unknown'))
+                        category = g.get('entity_category', 'unknown')
+                        date = g.get('date', 'unknown')
+                        print(f"  - {entity} ({category}) @ {date}")
+                else:
+                    print("  None")
+                
+                # Print predictions with confidence scores
+                print("PREDICTIONS:")
+                if note_predictions:
+                    for p in note_predictions:
+                        entity = p.get('entity_label', p.get('diagnosis', 'unknown'))
+                        category = p.get('entity_category', 'unknown')
+                        
+                        # Apply category mapping for display
+                        mapped_category = category
+                        if hasattr(extractor, 'config') and hasattr(extractor.config, 'CATEGORY_MAPPINGS') and category in extractor.config.CATEGORY_MAPPINGS:
+                            mapped_category = extractor.config.CATEGORY_MAPPINGS[category]
+                        
+                        date = p.get('date', 'unknown')
+                        confidence = p.get('confidence', 0.0)
+                        
+                        # Truncate very long entity names to prevent line wrapping
+                        max_entity_length = 40
+                        display_entity = entity
+                        if len(entity) > max_entity_length:
+                            display_entity = entity[:max_entity_length] + "..."
+                        
+                        # Get the category - use entity_category which should already be mapped
+                        # or fall back to the original_category if available
+                        display_category = p.get('entity_category', p.get('original_category', category))
+                        
+                        # Use a more compact format to avoid line wrapping
+                        print(f"  - {display_entity} ({display_category}) @ {date} [conf: {confidence:.4f}]")
+                else:
+                    print("  None")
+                
+                print("-" * 60)
+                
         except Exception as e:
             # Log errors during extraction for a specific note
             print(f"Extraction error on note {note_id} for {extractor.name}: {e}")
@@ -953,9 +1071,25 @@ def run_extraction(extractor, prepared_test_data):
             continue # Continue with the next note
 
     print(f"Generated {len(all_predictions)} predictions. Skipped {skipped_rels} potentially invalid relationships.")
+    
+    # Print summary of entity categories if available
+    if hasattr(extractor, 'seen_categories') and extractor.seen_categories:
+        print("\n===== ENTITY CATEGORY SUMMARY =====")
+        print(f"Found {len(extractor.seen_categories)} unique entity categories:")
+        for category in sorted(extractor.seen_categories):
+            print(f"  - '{category}'")
+        
+        # Print the category mapping if available
+        if hasattr(extractor, 'seen_raw_to_normalized') and extractor.seen_raw_to_normalized:
+            print("\n===== CATEGORY MAPPING USED =====")
+            print(f"Applied {len(extractor.seen_raw_to_normalized)} category mappings:")
+            for raw_category, normalized in sorted(extractor.seen_raw_to_normalized.items()):
+                print(f"  - '{raw_category}' → '{normalized}'")
+        print("===================================\n")
+    
     return all_predictions
 
-def calculate_entity_metrics(prepared_test_data, entity_gold, output_dir):
+def calculate_entity_metrics(prepared_test_data, entity_gold, output_dir, config=None):
     """
     Evaluates the entity extraction (NER) performance by comparing extracted entities with gold standard.
     
@@ -963,6 +1097,7 @@ def calculate_entity_metrics(prepared_test_data, entity_gold, output_dir):
         prepared_test_data (list): List of dicts containing extracted entities.
         entity_gold (list): List of gold standard entities.
         output_dir (str): Directory to save evaluation outputs.
+        config (module, optional): Configuration module with CATEGORY_MAPPINGS.
         
     Returns:
         dict: A dictionary containing calculated metrics.
@@ -971,21 +1106,42 @@ def calculate_entity_metrics(prepared_test_data, entity_gold, output_dir):
     if not entity_gold:
         print("No entity_gold data provided. Skipping NER evaluation.")
         return {'precision': 0, 'recall': 0, 'f1': 0}
-
+    
+    # Get category mappings if available
+    category_mappings = {}
+    if config and hasattr(config, 'CATEGORY_MAPPINGS'):
+        category_mappings = config.CATEGORY_MAPPINGS
+        print("Using category mappings for NER evaluation")
+    
     # Create sets for comparison
-    # Using (note_id, entity_label, entity_category, start, end) as the key for strict matching
-    gold_entities_set = set(
-        (g['note_id'], g['entity_label'], g['entity_category'], g['start'], g['end'])
-        for g in entity_gold
-    )
+    # Using (note_id, entity_label, normalized_category, start, end) as the key for matching
+    gold_entities_set = set()
+    for g in entity_gold:
+        # Apply category mapping to gold standard if available
+        entity_category = g['entity_category'].lower() if g['entity_category'] else 'unknown'
+        if entity_category in category_mappings:
+            normalized_category = category_mappings[entity_category]
+        else:
+            normalized_category = entity_category
+            
+        gold_entities_set.add(
+            (g['note_id'], g['entity_label'], normalized_category, g['start'], g['end'])
+        )
 
-    # Extract predicted entities from prepared_test_data
+    # Extract predicted entities from prepared_test_data and apply mappings
     predicted_entities_set = set()
     for note_data in prepared_test_data:
         note_id = note_data['note_id']
         for entity in note_data['extracted_entities']:
+            # Apply category mapping to predicted entities if available
+            entity_category = entity['category'].lower() if entity['category'] else 'unknown'
+            if entity_category in category_mappings:
+                normalized_category = category_mappings[entity_category]
+            else:
+                normalized_category = entity_category
+                
             predicted_entities_set.add(
-                (note_id, entity['label'], entity['category'], entity['start'], entity['end'])
+                (note_id, entity['label'], normalized_category, entity['start'], entity['end'])
             )
 
     # Calculate metrics
@@ -1106,50 +1262,11 @@ def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name,
     # Filter predictions to include only those from labeled notes
     filtered_predictions = [p for p in all_predictions if p['note_id'] in gold_note_ids]
     
-    # --- DEBUG: Print predictions and gold standards for comparison ---
-    print("\n--- Comparing Predictions to Gold Standard ---")
-    
-    # Load the dataset to get the note text if dataset_path is provided
-    note_texts = {}
-    if dataset_path:
-        try:
-            import pandas as pd
-            df = pd.read_csv(dataset_path)
-            if 'note' in df.columns and 'note_id' in df.columns:
-                for _, row in df.iterrows():
-                    note_id = row['note_id']
-                    if note_id in gold_note_ids:
-                        note_texts[note_id] = row['note']
-        except Exception as e:
-            print(f"Warning: Could not load note texts from dataset: {e}")
-    
-    # Print comparison for all notes with gold standard labels
-    for note_id in sorted(gold_note_ids):
-        # Using a simple list comprehension for clarity
-        note_preds = [p for p in filtered_predictions if p.get('note_id') == note_id]
-        note_golds = [g for g in gold_standard if g.get('note_id') == note_id]
-        
-        print(f"\n[Note ID: {note_id}]")
-        
-        # Print the full note text if available
-        if note_id in note_texts:
-            print("\nFULL NOTE TEXT:")
-            print("-" * 80)
-            print(note_texts[note_id])
-            print("-" * 80)
-        
-        # To make it easier to read, convert dicts to strings and join them
-        # Always use entity_label since our refactoring standardized on that field
-        gold_str = '\n    - '.join([f"{g.get('entity_label', 'unknown')} @ {g.get('date', 'unknown')}" for g in note_golds])
-        
-        # For predictions, still respect the mode since extractors might return different fields
-        if disorder_only_mode:
-            pred_str = '\n    - '.join([f"{p.get('diagnosis', p.get('entity_label', 'unknown'))} @ {p.get('date', 'unknown')}" for p in note_preds])
-        else:
-            pred_str = '\n    - '.join([f"{p.get('entity_label', p.get('diagnosis', 'unknown'))} @ {p.get('date', 'unknown')}" for p in note_preds])
-        
-        print(f"  Gold Standard : \n    - {gold_str if gold_str else '[]'}")
-        print(f"  Predictions   : \n    - {pred_str if pred_str else '[]'}")
+    # Skip detailed note-by-note comparison as we now show this during extraction
+    # We'll just print a summary message
+    print("\n--- Evaluation Summary ---")
+    print(f"Evaluating {len(filtered_predictions)} predictions against {len(gold_standard)} gold standard relationships.")
+    print(f"Notes with gold standard labels: {num_labeled_notes}")
     print("--------------------------------------------\n")
     
     if not filtered_predictions:

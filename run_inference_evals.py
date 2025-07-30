@@ -74,7 +74,7 @@ def run_inference_and_evaluate():
 
     # Generate predictions
     print(f"Running extraction with {extractor.name}...")
-    all_predictions = run_extraction(extractor, prepared_test_data)
+    all_predictions = run_extraction(extractor, prepared_test_data, relationship_gold, dataset_path)
     print(f"Generated {len(all_predictions)} predictions.")
 
     # Save predictions to CSV
@@ -135,10 +135,21 @@ def run_inference_and_evaluate():
             
         # Fill in predictions column
         num_filled = 0
-        for i, row in tqdm(df.iterrows(), total=len(df), desc="Saving predictions"):
-            if i in note_predictions:
-                df.at[i, predictions_column] = json.dumps(note_predictions[i])
-                num_filled += 1
+        note_id_column = getattr(config, 'NOTE_ID_COLUMN', None)
+        
+        # If we have a note_id column in the data, use that to match predictions
+        if note_id_column and note_id_column in df.columns:
+            for i, row in tqdm(df.iterrows(), total=len(df), desc="Saving predictions"):
+                note_id = row[note_id_column]
+                if note_id in note_predictions:
+                    df.at[i, predictions_column] = json.dumps(note_predictions[note_id])
+                    num_filled += 1
+        else:
+            # Fall back to using row index as note_id
+            for i, row in tqdm(df.iterrows(), total=len(df), desc="Saving predictions"):
+                if i in note_predictions:
+                    df.at[i, predictions_column] = json.dumps(note_predictions[i])
+                    num_filled += 1
         
         # Save the updated dataframe back to CSV
         df.to_csv(dataset_path, index=False)

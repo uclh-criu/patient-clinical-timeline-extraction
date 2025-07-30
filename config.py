@@ -3,12 +3,12 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used for inference, evaluation, and timeline generation.
 # Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated', 'nph'
-DATA_SOURCE = 'nph'
+DATA_SOURCE = 'imaging'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to use for the relation extraction task.
 # Valid options: 'diagnosis_only', 'multi_entity'
-ENTITY_MODE = "multi_entity"
+ENTITY_MODE = "diagnosis_only"
 
 # --- Execution Settings --- #
 # Controls the extraction method to use for the relation extraction task.
@@ -27,13 +27,9 @@ NOTES_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_notes.csv'
 LETTERS_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_letters.csv'
 NPH_DATA_PATH = 'data/synthetic_results_final.csv'
 
-# --- Test Data Paths --- #
-# These paths point to the datasets used for automated testing
-TEST_DIAGNOSIS_ONLY_DATA_PATH = 'data/synthetic.csv'
-TEST_MULTI_ENTITY_DATA_PATH = 'data/synthetic_updated.csv'
-
 # --- Data Column Names --- #
 PATIENT_ID_COLUMN = 'patient'     # Column containing patient identifiers
+NOTE_ID_COLUMN = 'note_id'        # Column containing unique note identifiers
 TEXT_COLUMN = 'note'              # Column containing clinical notes
 TIMESTAMP_COLUMN = 'document_timestamp'   # Column containing document creation timestamp
 DATES_COLUMN = 'formatted_dates'          # Column containing pre-extracted date entities
@@ -47,8 +43,8 @@ UMLS_COLUMN = 'extracted_umls_entities'             # Used in multi_entity mode
 PROXIMITY_MAX_DISTANCE = 200  
 
 # --- Custom Extractor Parameters --- #
-MODEL_PATH = 'custom_model_training/best_model.pt'  
-VOCAB_PATH = 'custom_model_training/vocab.pt'
+MODEL_PATH = 'custom_model_training/models/custom_processed_notes_with_dates_and_disorders_imaging_labelled_diagnosis_only.pt'  
+VOCAB_PATH = 'custom_model_training/vocabs/vocab.pt'
 PREDICTION_MAX_DISTANCE = 500 # Max char distance used by custom_extractor when finding candidate pairs
 PREDICTION_MAX_CONTEXT_LEN = 512 # Max sequence length used by custom_extractor when creating input tensors
 CUSTOM_CONFIDENCE_THRESHOLD = 0.5 # Confidence threshold for custom model predictions
@@ -76,9 +72,41 @@ RELATIVE_DATE_LLM_MODEL = 'openai'           # Which LLM to use: 'openai' or 'll
 RELATIVE_DATE_OPENAI_MODEL = 'gpt-3.5-turbo' # OpenAI model for relative date extraction (cheaper than gpt-4o)
 RELATIVE_DATE_CONTEXT_WINDOW = 2500         # Maximum context window to send to LLM for date extraction
 
+# --- Test Data Paths --- #
+# These paths point to the datasets used for automated testing
+TEST_DIAGNOSIS_ONLY_DATA_PATH = 'data/synthetic.csv'
+TEST_MULTI_ENTITY_DATA_PATH = 'data/synthetic_updated.csv'
+
 # --- Debug Settings --- #
 DEBUG_MODE = False  # Set to True for verbose logging during API calls and data processing
 MODEL_DEBUG_MODE = True  # Set to True to enable diagnostic prints in the model during training and inference
+
+# --- Entity Category Mappings --- #
+# Maps detailed entity categories to simplified categories for evaluation and display
+CATEGORY_MAPPINGS = {
+    # Diagnosis-related categories
+    'disorder': 'diagnosis',
+    'neoplastic process': 'diagnosis',
+    'acquired abnormality': 'diagnosis',
+    'anatomical abnormality': 'diagnosis',
+    'mental or behavioral dysfunction': 'diagnosis',
+    'pathologic function': 'diagnosis',
+    
+    # Symptom-related categories
+    'sign or symptom': 'symptom',
+    'finding': 'symptom',
+    
+    # Procedure-related categories
+    'procedure': 'procedure',
+    'diagnostic procedure': 'procedure',
+    'therapeutic or preventive procedure': 'procedure',
+    
+    # Medication-related categories
+    'clinical drug': 'medication',
+    'pharmacologic substance': 'medication',
+    'product': 'medication',
+    'organism': 'medication'  # Assuming organisms are used in medications
+}
 
 # --- Hardware Settings --- #
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
