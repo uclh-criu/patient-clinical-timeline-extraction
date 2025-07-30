@@ -203,6 +203,10 @@ def run_inference_and_evaluate():
     print(f"  Recall:    {relationship_metrics['recall']:.3f}")
     print(f"  F1 Score:  {relationship_metrics['f1']:.3f}")
     
+    # Log the inference run results to CSV
+    from utils.inference_eval_utils import log_inference_run
+    log_inference_run(config, relationship_metrics, dataset_path)
+    
     print("\nEvaluation completed!")
 
 if __name__ == "__main__":

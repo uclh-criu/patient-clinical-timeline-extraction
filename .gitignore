@@ -16,6 +16,9 @@ synthetic.csv
 synthetic_updated.csv
 sample.csv
 template.csv
+imaging.csv
+synthetic_multi.csv
+nph.csv
 synthetic_results_final.csv
 model.safetensors
 

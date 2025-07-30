@@ -71,8 +71,8 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
     dataset_path = config['TRAINING_DATA_PATH']
     dataset_name = os.path.basename(dataset_path)
     
-    # Create model name based on dataset and entity mode
-    model_name = f"custom_{os.path.splitext(dataset_name)[0]}_{entity_mode}.pt"
+    # Create model name based on dataset name only
+    model_name = f"{os.path.splitext(dataset_name)[0]}_custom.pt"
     
     # Create data loaders using config batch size
     train_loader = DataLoader(train_dataset, batch_size=config['BATCH_SIZE'], shuffle=True)
@@ -81,6 +81,7 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
     # Step 4: Initialize and train model using config settings
     # Check if weighted loss should be used
     use_weighted_loss = config.get('USE_WEIGHTED_LOSS', False)
+    pos_weight = None
     if use_weighted_loss:
         # Calculate or use provided positive weight
         pos_weight = config.get('POS_WEIGHT', None)
@@ -88,6 +89,8 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
             # Auto-calculate from data
             pos_weight = labels_info['negative'] / max(1, labels_info['positive'])
             print(f"Auto-calculated positive weight: {pos_weight:.2f}")
+            # Update the config with the calculated value so it gets logged properly
+            config['POS_WEIGHT'] = pos_weight
         
         if pos_weight is not None:
             # Convert to tensor and use weighted BCE loss
@@ -142,17 +145,19 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         'positive_examples_pct': labels_info['positive_pct']
     }
     
-    # Log the training run to CSV (but don't save model or plots yet)
+    # Don't log here, only log the best model at the end of grid search
     model_full_path = os.path.join(project_root, 'custom_model_training/models', model_name)
-    log_training_run(
-        model_full_path, 
-        hyperparams, 
-        metrics, 
-        dataset_name, 
-        entity_mode,
-        os.path.join(project_root, 'custom_model_training'),
-        'custom_model_training_log.csv'
-    )
+    # Disabled logging for individual runs
+    if False:
+        log_training_run(
+            model_full_path, 
+            hyperparams, 
+            metrics, 
+            dataset_name, 
+            entity_mode,
+            os.path.join(project_root, 'custom_model_training'),
+            'custom_model_training_log.csv'
+        )
     
     # Return metrics, model state, and config for later use
     return metrics['best_val_f1'], best_model_state, metrics, model_name, config
@@ -364,8 +369,10 @@ def train():
         print(f"Best model and config saved to: {model_full_path}")
         
         # Plot training curves for the best model only
+        # Extract dataset name from model name
+        dataset_name = os.path.splitext(best_model_name)[0].replace('_custom', '')
         plot_save_path = os.path.join(project_root, 'custom_model_training/plots', 
-                                     f"{os.path.splitext(best_model_name)[0]}_training_curves")
+                                     f"{dataset_name}_custom")
         
         # Add title suffix indicating if weighted loss was used
         title_suffix = ""
@@ -380,12 +387,54 @@ def train():
         # Plot training curves for the best model
         plot_training_curves(best_metrics, plot_save_path, title_suffix=title_suffix)
     
+    # Log only the best model at the end of grid search
+    if best_model_state is not None:
+        # Extract dataset name from best model name
+        dataset_name = os.path.basename(best_config['TRAINING_DATA_PATH'])
+        entity_mode = best_config['ENTITY_MODE']
+        
+        # Create hyperparams dict for logging (reuse the serializable_config)
+        hyperparams_for_logging = {
+            'ENTITY_MODE': best_config.get('ENTITY_MODE'),
+            'MAX_DISTANCE': best_config.get('MAX_DISTANCE'),
+            'MAX_CONTEXT_LEN': best_config.get('MAX_CONTEXT_LEN'),
+            'EMBEDDING_DIM': best_config.get('EMBEDDING_DIM'),
+            'HIDDEN_DIM': best_config.get('HIDDEN_DIM'),
+            'BATCH_SIZE': best_config.get('BATCH_SIZE'),
+            'LEARNING_RATE': best_config.get('LEARNING_RATE'),
+            'NUM_EPOCHS': best_config.get('NUM_EPOCHS'),
+            'DROPOUT': best_config.get('DROPOUT'),
+            'USE_DISTANCE_FEATURE': best_config.get('USE_DISTANCE_FEATURE'),
+            'USE_POSITION_FEATURE': best_config.get('USE_POSITION_FEATURE'),
+            'ENTITY_CATEGORY_EMBEDDING_DIM': best_config.get('ENTITY_CATEGORY_EMBEDDING_DIM'),
+            'USE_WEIGHTED_LOSS': best_config.get('USE_WEIGHTED_LOSS', False),
+            'POS_WEIGHT': best_config.get('POS_WEIGHT'),  # This will now have the auto-calculated value
+            'train_examples': len(train_features),
+            'val_examples': len(val_features),
+            'positive_examples_pct': labels_info['positive_pct']
+        }
+        
+        # Add a debug print to verify POS_WEIGHT is being passed correctly
+        if best_config.get('USE_WEIGHTED_LOSS', False):
+            print(f"Logging POS_WEIGHT: {best_config.get('POS_WEIGHT')}")
+        
+        # Log the best model
+        log_training_run(
+            model_full_path,
+            hyperparams_for_logging,
+            best_metrics,
+            dataset_name,
+            entity_mode,
+            os.path.join(project_root, 'custom_model_training'),
+            'custom_model_training_log.csv'
+        )
+
     print(f"Best hyperparameters:")
     for key, value in best_config.items():
         if isinstance(getattr(training_config_custom, key, None), list):
             print(f"  {key}: {value}")
     print(f"{'='*80}")
-    
+
     print("Done!")
 
 if __name__ == "__main__":

@@ -47,11 +47,11 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
     dataset_path = hyperparams['BERT_TRAINING_DATA_PATH']
     dataset_name = os.path.basename(dataset_path)
     
-    # Create model name based on dataset and entity mode
-    model_name = f"bert_{os.path.splitext(dataset_name)[0]}_{entity_mode}.pt"
+    # Create model name based on dataset name only
+    model_name = f"{os.path.splitext(dataset_name)[0]}_bert.pt"
     
     # Ensure model directory exists
-    model_dir = os.path.join(project_root, 'bert_model_training/bert_model')
+    model_dir = os.path.join(project_root, 'bert_model_training/models')
     os.makedirs(model_dir, exist_ok=True)
     model_path = os.path.join(model_dir, model_name)
     
@@ -118,7 +118,9 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
     )
     
     # Plot training curves
-    curves_path = os.path.join(model_dir, f"{os.path.splitext(model_name)[0]}_training_curves")
+    # Extract dataset name from model name
+    dataset_name = os.path.splitext(model_name)[0].replace('_bert', '')
+    curves_path = os.path.join(project_root, 'bert_model_training/plots', f"{dataset_name}_bert")
     plot_training_curves(metrics, curves_path)
     
     # Log the training run
@@ -131,18 +133,27 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
         'BERT_NUM_TRAIN_EPOCHS': hyperparams['BERT_NUM_TRAIN_EPOCHS'],
         'BERT_DROPOUT': hyperparams['BERT_DROPOUT'],
         'train_examples': len(train_dataset),
-        'val_examples': len(val_dataset) if val_dataset else 0
+        'val_examples': len(val_dataset) if val_dataset else 0,
+        'positive_examples_pct': 0,  # This will need to be calculated properly
+        'POS_WEIGHT': None,
+        'USE_WEIGHTED_LOSS': False,
+        'USE_DISTANCE_FEATURE': False,
+        'USE_POSITION_FEATURE': False,
+        'ENTITY_CATEGORY_EMBEDDING_DIM': 0
     }
     
-    log_training_run(
-        model_path,
-        hyperparams_for_logging,
-        metrics,
-        dataset_name,
-        entity_mode,
-        os.path.join(project_root, 'bert_model_training'),
-        'bert_model_training_log.csv'
-    )
+    # Only log the best model at the end of grid search, not here
+    # This function will be called in the main() function after finding the best model
+    if False:  # Disable logging here
+        log_training_run(
+            model_path,
+            hyperparams_for_logging,
+            metrics,
+            dataset_name,
+            entity_mode,
+            os.path.join(project_root, 'bert_model_training'),
+            'bert_model_training_log.csv'
+        )
     
     return metrics['best_val_acc'], model_path, metrics
 
@@ -229,6 +240,52 @@ def main():
         if isinstance(getattr(training_config, key, None), list):
             print(f"  {key}: {value}")
     print(f"{'='*80}")
+    
+    # Log only the best model at the end of grid search
+    if best_model_path and best_metrics and best_config:
+        # Extract dataset name from path
+        dataset_name = os.path.basename(best_config['BERT_TRAINING_DATA_PATH'])
+        entity_mode = best_config['ENTITY_MODE']
+        
+        # Create hyperparams dict for logging
+        hyperparams_for_logging = {
+            'ENTITY_MODE': entity_mode,
+            'BERT_PRETRAINED_MODEL': best_config['BERT_PRETRAINED_MODEL'],
+            'BERT_MAX_SEQ_LENGTH': best_config['BERT_MAX_SEQ_LENGTH'],
+            'BERT_BATCH_SIZE': best_config['BERT_BATCH_SIZE'],
+            'BERT_LEARNING_RATE': best_config['BERT_LEARNING_RATE'],
+            'BERT_NUM_TRAIN_EPOCHS': best_config['BERT_NUM_TRAIN_EPOCHS'],
+            'BERT_DROPOUT': best_config['BERT_DROPOUT'],
+            'train_examples': len(train_dataset),
+            'val_examples': len(val_dataset) if val_dataset else 0,
+            'positive_examples_pct': 0,  # Would need to calculate from dataset
+            'POS_WEIGHT': None,
+            'USE_WEIGHTED_LOSS': False,
+            'USE_DISTANCE_FEATURE': False,
+            'USE_POSITION_FEATURE': False,
+            'ENTITY_CATEGORY_EMBEDDING_DIM': 0
+        }
+        
+        # Ensure best_metrics has all required fields for the CSV log
+        if 'best_val_f1' not in best_metrics:
+            best_metrics['best_val_f1'] = 0
+        if 'best_val_precision' not in best_metrics:
+            best_metrics['best_val_precision'] = 0
+        if 'best_val_recall' not in best_metrics:
+            best_metrics['best_val_recall'] = 0
+        if 'best_val_threshold' not in best_metrics:
+            best_metrics['best_val_threshold'] = 0.5
+        
+        # Log the best model
+        log_training_run(
+            best_model_path,
+            hyperparams_for_logging,
+            best_metrics,
+            dataset_name,
+            entity_mode,
+            os.path.join(project_root, 'bert_model_training'),
+            'bert_model_training_log.csv'
+        )
     
     print("Training completed successfully!")
 

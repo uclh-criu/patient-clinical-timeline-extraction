@@ -28,7 +28,7 @@ def build_vocabulary():
     dataset_name = os.path.splitext(os.path.basename(training_data_path))[0]
     
     # Create a vocabulary path based on the dataset name
-    vocab_filename = f"vocab_{dataset_name}.pt"
+    vocab_filename = f"{dataset_name}_vocab.pt"
     vocab_dir = os.path.join(project_root, "custom_model_training", "vocabs")
     vocab_full_path = os.path.join(vocab_dir, vocab_filename)
     

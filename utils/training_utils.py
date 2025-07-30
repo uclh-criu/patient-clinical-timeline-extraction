@@ -92,7 +92,42 @@ def log_training_run(model_path, hyperparams, metrics, dataset_name, entity_mode
     # Extract model filename from path
     model_filename = os.path.basename(model_path)
     
-    # Prepare the log entry
+    # Determine which model type this is based on the log filename
+    is_bert_model = 'bert' in log_filename.lower()
+    
+    # Define columns based on model type
+    if is_bert_model:
+        # BERT model columns
+        columns = [
+            'timestamp', 'dataset', 'entity_mode', 'model_filename',
+            'val_accuracy', 'val_f1', 'val_precision', 'val_recall', 'val_threshold',
+            'val_loss', 'train_loss', 'epochs',
+            # Common parameters
+            'ENTITY_MODE',
+            # BERT model parameters
+            'BERT_PRETRAINED_MODEL', 'BERT_MAX_SEQ_LENGTH', 'BERT_BATCH_SIZE',
+            'BERT_LEARNING_RATE', 'BERT_NUM_TRAIN_EPOCHS', 'BERT_DROPOUT',
+            # Dataset statistics
+            'train_examples', 'val_examples', 'positive_examples_pct'
+        ]
+    else:
+        # Custom model columns
+        columns = [
+            'timestamp', 'dataset', 'entity_mode', 'model_filename',
+            'val_accuracy', 'val_f1', 'val_precision', 'val_recall', 'val_threshold',
+            'val_loss', 'train_loss', 'epochs',
+            # Common parameters
+            'ENTITY_MODE',
+            # Custom model parameters
+            'MAX_DISTANCE', 'MAX_CONTEXT_LEN', 'EMBEDDING_DIM', 'HIDDEN_DIM',
+            'BATCH_SIZE', 'LEARNING_RATE', 'NUM_EPOCHS', 'DROPOUT',
+            'USE_DISTANCE_FEATURE', 'USE_POSITION_FEATURE', 'ENTITY_CATEGORY_EMBEDDING_DIM',
+            'USE_WEIGHTED_LOSS', 'POS_WEIGHT',
+            # Dataset statistics
+            'train_examples', 'val_examples', 'positive_examples_pct'
+        ]
+    
+    # Prepare the log entry with standard metrics
     log_entry = {
         'timestamp': timestamp,
         'dataset': dataset_name,
@@ -102,15 +137,20 @@ def log_training_run(model_path, hyperparams, metrics, dataset_name, entity_mode
         'val_f1': metrics.get('best_val_f1', 0),
         'val_precision': metrics.get('best_val_precision', 0),
         'val_recall': metrics.get('best_val_recall', 0),
-        'val_threshold': metrics.get('best_val_threshold', 0.5),  # Add threshold to log
+        'val_threshold': metrics.get('best_val_threshold', 0.5),
         'val_loss': metrics.get('val_loss', 0),
         'train_loss': metrics.get('train_loss', 0),
         'epochs': metrics.get('epochs', 0),
     }
     
-    # Add all hyperparameters to the log entry
+    # Add hyperparameters to the log entry
     for key, value in hyperparams.items():
         log_entry[key] = value
+    
+    # Create an ordered dictionary with model-specific columns
+    ordered_log_entry = {}
+    for column in columns:
+        ordered_log_entry[column] = log_entry.get(column, '')
     
     # Check if the log file exists
     file_exists = os.path.isfile(log_file)
@@ -118,13 +158,13 @@ def log_training_run(model_path, hyperparams, metrics, dataset_name, entity_mode
     # Write to the CSV file
     try:
         with open(log_file, mode='a', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=log_entry.keys())
+            writer = csv.DictWriter(f, fieldnames=columns)
             
             # Write header if file doesn't exist
             if not file_exists:
                 writer.writeheader()
             
-            writer.writerow(log_entry)
+            writer.writerow(ordered_log_entry)
         
         print(f"Training run logged to {log_file}")
     except Exception as e:

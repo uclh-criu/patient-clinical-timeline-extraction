@@ -25,20 +25,14 @@ def get_data_path(config):
     
     if data_source == 'synthetic':
         return config.SYNTHETIC_DATA_PATH
-    elif data_source == 'synthetic_updated':
-        return config.SYNTHETIC_UPDATED_DATA_PATH
-    elif data_source == 'sample':
-        return config.SAMPLE_DATA_PATH
+    elif data_source == 'synthetic_multi':
+        return config.SYNTHETIC_MULTI_DATA_PATH
     elif data_source == 'imaging':
         return config.IMAGING_DATA_PATH
-    elif data_source == 'notes':
-        return config.NOTES_DATA_PATH
-    elif data_source == 'letters':
-        return config.LETTERS_DATA_PATH
     elif data_source == 'nph':
         return config.NPH_DATA_PATH
     else:
-        raise ValueError(f"Unknown data source: {data_source}. Valid options are: 'synthetic', 'synthetic_updated', 'sample', 'imaging', 'notes', 'letters', 'nph'")
+        raise ValueError(f"Unknown data source: {data_source}. Valid options are: 'synthetic', 'synthetic_multi', 'imaging', 'nph'")
 
 def safe_json_loads(data_string):
     """
@@ -1201,6 +1195,88 @@ def calculate_entity_metrics(prepared_test_data, entity_gold, output_dir, config
         print(f"  Error saving entity confusion matrix: {e}")
 
     return {'precision': precision, 'recall': recall, 'f1': f1}
+
+def log_inference_run(config, metrics, dataset_path):
+    """
+    Logs inference run details to a CSV file.
+    
+    Args:
+        config: Configuration object with settings used for the run
+        metrics (dict): Dictionary containing calculated metrics (precision, recall, f1, etc.)
+        dataset_path (str): Path to the dataset used for inference
+    """
+    import csv
+    import datetime
+    import os
+    
+    # Define the log file path in the project root
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_file = os.path.join(project_root, "inference_log.csv")
+    
+    # Get current timestamp
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Define a fixed set of columns that includes ALL possible parameters from ALL methods
+    # This ensures the CSV structure remains consistent regardless of extraction method
+    fixed_columns = [
+        'timestamp', 'data_source', 'entity_mode', 'extraction_method',
+        'precision', 'recall', 'f1', 'accuracy',
+        # Custom model parameters
+        'model_path', 'vocab_path', 'confidence_threshold',
+        # BERT model parameters
+        'bert_model_path', 'bert_confidence_threshold',
+        # Naive extractor parameters
+        'proximity_max_distance',
+        # Other potential parameters
+        'dataset_path'
+    ]
+    
+    # Create log entry with standard fields
+    log_entry = {
+        'timestamp': timestamp,
+        'data_source': config.DATA_SOURCE,
+        'entity_mode': config.ENTITY_MODE,
+        'extraction_method': config.EXTRACTION_METHOD,
+        'precision': metrics.get('precision', 0),
+        'recall': metrics.get('recall', 0),
+        'f1': metrics.get('f1', 0),
+        'accuracy': metrics.get('accuracy', 0),
+        'dataset_path': dataset_path
+    }
+    
+    # Add method-specific parameters based on extraction method
+    if config.EXTRACTION_METHOD.lower() == 'custom':
+        log_entry['model_path'] = config.MODEL_PATH
+        log_entry['vocab_path'] = config.VOCAB_PATH
+        log_entry['confidence_threshold'] = config.CUSTOM_CONFIDENCE_THRESHOLD
+    elif config.EXTRACTION_METHOD.lower() == 'bert':
+        log_entry['bert_model_path'] = config.BERT_MODEL_PATH
+        log_entry['confidence_threshold'] = config.BERT_CONFIDENCE_THRESHOLD
+    elif config.EXTRACTION_METHOD.lower() == 'naive':
+        log_entry['proximity_max_distance'] = config.PROXIMITY_MAX_DISTANCE
+    
+    # Create an ordered dictionary with all columns, filling missing values with empty strings
+    ordered_log_entry = {}
+    for column in fixed_columns:
+        ordered_log_entry[column] = log_entry.get(column, '')
+    
+    # Check if the log file exists
+    file_exists = os.path.isfile(log_file)
+    
+    # Write to the CSV file
+    try:
+        with open(log_file, mode='a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fixed_columns)
+            
+            # Write header if file doesn't exist
+            if not file_exists:
+                writer.writeheader()
+            
+            writer.writerow(ordered_log_entry)
+        
+        print(f"Inference run logged to {log_file}")
+    except Exception as e:
+        print(f"Error logging inference run: {e}")
 
 def calculate_and_report_metrics(all_predictions, gold_standard, extractor_name, output_dir, total_notes_processed, dataset_path=None):
     """

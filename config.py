@@ -2,8 +2,8 @@ import torch
 
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used for inference, evaluation, and timeline generation.
-# Valid options: 'imaging', 'notes', 'letters', 'sample', 'synthetic', 'synthetic_updated', 'nph'
-DATA_SOURCE = 'imaging'
+# Valid options: 'imaging', 'synthetic', 'synthetic_multi', 'nph'
+DATA_SOURCE = 'synthetic'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to use for the relation extraction task.
@@ -13,19 +13,16 @@ ENTITY_MODE = "diagnosis_only"
 # --- Execution Settings --- #
 # Controls the extraction method to use for the relation extraction task.
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'custom'
+EXTRACTION_METHOD = 'naive'
 TRAINING_SET_RATIO = 0.8 # The ratio of data to be used for the training set. The rest will be used for the test/inference set.
 DATA_SPLIT_RANDOM_SEED = 42 # A fixed random seed to ensure the train/test split is always the same.
 INFERENCE_SAMPLES = None # Limits the number of samples used from the test set. Set to None to use all test samples.
 
 # --- Data File Paths --- #
-SAMPLE_DATA_PATH = 'data/sample.csv'
 SYNTHETIC_DATA_PATH = 'data/synthetic.csv'
-SYNTHETIC_UPDATED_DATA_PATH = 'data/synthetic_updated.csv'
-IMAGING_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_imaging_labelled.csv'
-NOTES_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_notes.csv'
-LETTERS_DATA_PATH = 'data/processed_notes_with_dates_and_disorders_letters.csv'
-NPH_DATA_PATH = 'data/synthetic_results_final.csv'
+IMAGING_DATA_PATH = 'data/imaging.csv'
+SYNTHETIC_MULTI_DATA_PATH = 'data/synthetic_multi.csv'
+NPH_DATA_PATH = 'data/nph.csv'
 
 # --- Data Column Names --- #
 PATIENT_ID_COLUMN = 'patient'     # Column containing patient identifiers
@@ -43,14 +40,14 @@ UMLS_COLUMN = 'extracted_umls_entities'             # Used in multi_entity mode
 PROXIMITY_MAX_DISTANCE = 200  
 
 # --- Custom Extractor Parameters --- #
-MODEL_PATH = 'custom_model_training/models/custom_processed_notes_with_dates_and_disorders_imaging_labelled_diagnosis_only.pt'  
-VOCAB_PATH = 'custom_model_training/vocabs/vocab.pt'
+MODEL_PATH = 'custom_model_training/models/synthetic_custom.pt'  
+VOCAB_PATH = 'custom_model_training/vocabs/synthetic_vocab.pt'
 PREDICTION_MAX_DISTANCE = 500 # Max char distance used by custom_extractor when finding candidate pairs
 PREDICTION_MAX_CONTEXT_LEN = 512 # Max sequence length used by custom_extractor when creating input tensors
 CUSTOM_CONFIDENCE_THRESHOLD = 0.5 # Confidence threshold for custom model predictions
 
 # --- BERT Extractor Parameters --- #
-BERT_MODEL_PATH = './bert_model_training/bert_model'
+BERT_MODEL_PATH = './bert_model_training/models'
 BERT_CONFIDENCE_THRESHOLD = 0.185  # Confidence threshold for BERT predictions
 
 # --- Llama Extractor Parameters --- #

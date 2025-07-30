@@ -12,21 +12,21 @@ def test_get_data_path():
     mock_config = MagicMock()
     mock_config.DATA_SOURCE = 'synthetic'
     mock_config.SYNTHETIC_DATA_PATH = 'data/synthetic.csv'
-    mock_config.SYNTHETIC_UPDATED_DATA_PATH = 'data/synthetic_updated.csv'
-    mock_config.SAMPLE_DATA_PATH = 'data/sample.csv'
+    mock_config.SYNTHETIC_MULTI_DATA_PATH = 'data/synthetic_multi.csv'
     mock_config.IMAGING_DATA_PATH = 'data/imaging.csv'
-    mock_config.NOTES_DATA_PATH = 'data/notes.csv'
-    mock_config.LETTERS_DATA_PATH = 'data/letters.csv'
     mock_config.NPH_DATA_PATH = 'data/nph.csv'
     
     # Test each valid data source
     assert inference_eval_utils.get_data_path(mock_config) == 'data/synthetic.csv'
     
-    mock_config.DATA_SOURCE = 'synthetic_updated'
-    assert inference_eval_utils.get_data_path(mock_config) == 'data/synthetic_updated.csv'
+    mock_config.DATA_SOURCE = 'synthetic_multi'
+    assert inference_eval_utils.get_data_path(mock_config) == 'data/synthetic_multi.csv'
     
-    mock_config.DATA_SOURCE = 'sample'
-    assert inference_eval_utils.get_data_path(mock_config) == 'data/sample.csv'
+    mock_config.DATA_SOURCE = 'imaging'
+    assert inference_eval_utils.get_data_path(mock_config) == 'data/imaging.csv'
+    
+    mock_config.DATA_SOURCE = 'nph'
+    assert inference_eval_utils.get_data_path(mock_config) == 'data/nph.csv'
     
     # Test invalid data source
     mock_config.DATA_SOURCE = 'invalid'
