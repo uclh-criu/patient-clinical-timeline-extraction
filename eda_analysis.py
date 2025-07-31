@@ -25,7 +25,7 @@ from utils.inference_eval_utils import load_and_prepare_data, preprocess_note_fo
 
 # ===== CONFIGURABLE VARIABLES =====
 # Path to the dataset to analyze - change this to point to your data file
-DATA_PATH = 'data/imaging.csv'
+DATA_PATH = 'data/nph.csv'
 
 # Entity mode to use for analysis - must match the structure of your data
 # Options: 'multi_entity' (uses SNOMED_COLUMN and UMLS_COLUMN) or 'diagnosis_only' (uses DIAGNOSES_COLUMN)

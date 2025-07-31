@@ -270,12 +270,68 @@ def train():
         print("Please check your data format and ensure that extracted_disorders and formatted_dates are correctly parsed.")
         return
     
-    # Create train / val / test datasets once
-    train_features, val_features, train_labels, val_labels = train_test_split(
-        features, labels, test_size=0.2, random_state=42
-    )
+    # Create train / val datasets using patient-based splitting to prevent data leakage
     
-    print(f"Train: {len(train_features)}, Validation: {len(val_features)}")
+    # First, extract patient IDs from features
+    patient_ids = []
+    for feature in features:
+        patient_id = feature.get('patient_id')
+        patient_ids.append(patient_id)
+    
+    # Get unique patient IDs
+    unique_patient_ids = list(set(patient_id for patient_id in patient_ids if patient_id is not None))
+    
+    if len(unique_patient_ids) > 1:
+        print(f"Found {len(unique_patient_ids)} unique patients for patient-based splitting")
+        
+        # Create a stratification array based on whether patients have positive examples
+        patients_with_positive = set()
+        
+        # Find patients with positive examples
+        for i, (feature, label) in enumerate(zip(features, labels)):
+            if label == 1 and feature.get('patient_id') is not None:
+                patients_with_positive.add(feature.get('patient_id'))
+        
+        # Create stratification labels: 1 for patients with positive examples, 0 for others
+        stratify_labels = [1 if p in patients_with_positive else 0 for p in unique_patient_ids]
+        
+        # Only stratify if we have both positive and negative examples
+        if len(set(stratify_labels)) > 1:
+            print("Using stratified patient-based splitting")
+            train_patients, val_patients = train_test_split(
+                unique_patient_ids,
+                test_size=0.2,
+                random_state=42,
+                stratify=stratify_labels
+            )
+        else:
+            print("Using non-stratified patient-based splitting (all patients have same label)")
+            train_patients, val_patients = train_test_split(
+                unique_patient_ids,
+                test_size=0.2,
+                random_state=42
+            )
+        
+        # Now split features and labels based on patient IDs
+        train_indices = [i for i, feature in enumerate(features) 
+                        if feature.get('patient_id') in train_patients]
+        val_indices = [i for i, feature in enumerate(features) 
+                      if feature.get('patient_id') in val_patients]
+        
+        train_features = [features[i] for i in train_indices]
+        train_labels = [labels[i] for i in train_indices]
+        val_features = [features[i] for i in val_indices]
+        val_labels = [labels[i] for i in val_indices]
+        
+        print(f"Patient-based split: Train patients: {len(train_patients)}, Validation patients: {len(val_patients)}")
+    else:
+        # Fall back to traditional feature-based splitting if patient IDs are not available
+        print("Warning: Patient IDs not available or only one patient found. Falling back to feature-based splitting.")
+        train_features, val_features, train_labels, val_labels = train_test_split(
+            features, labels, test_size=0.2, random_state=42
+        )
+    
+    print(f"Train: {len(train_features)} examples, Validation: {len(val_features)} examples")
     
     # Create entity category map for multi-entity mode
     entity_category_map = {

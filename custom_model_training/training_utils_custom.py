@@ -293,6 +293,8 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
     for note_entry in prepared_data:
         note_text = note_entry['note']
         disorders, dates = note_entry['entities']
+        patient_id = note_entry.get('patient_id')  # Get patient_id from note entry
+        note_id = note_entry.get('note_id')
         
         # Generate features using preprocess_note_for_prediction
         note_features = preprocess_note_for_prediction(note_text, disorders, dates, max_distance)
@@ -316,6 +318,10 @@ def prepare_custom_training_data(dataset_path_or_data, max_distance, vocab_class
                 feature['entity_category'] = entity_categories[key]
             else:
                 feature['entity_category'] = 'diagnosis'  # Default
+            
+            # Add patient_id and note_id to feature for patient-aware splitting
+            feature['patient_id'] = patient_id
+            feature['note_id'] = note_id
             
             all_features.append(feature)
             all_labels.append(label)

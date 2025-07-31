@@ -20,11 +20,14 @@ from custom_model_training.Vocabulary import Vocabulary
 class TestDataSplitting:
     """Tests to ensure data splitting is done correctly and reproducibly."""
     
-    def test_data_split_ratio(self, diagnosis_only_test_file_path, diagnosis_only_config):
-        """Test that the data is split according to the specified ratio."""
+    def test_patient_split_ratio(self, diagnosis_only_test_file_path, diagnosis_only_config):
+        """Test that patients are split according to the specified ratio."""
         # Load data
         df = pd.read_csv(diagnosis_only_test_file_path)
-        total_samples = len(df)
+        
+        # Get total number of unique patients
+        patient_id_column = diagnosis_only_config.PATIENT_ID_COLUMN
+        total_unique_patients = len(df[patient_id_column].unique())
         
         # Set the split ratio in the config
         config = diagnosis_only_config
@@ -45,16 +48,24 @@ class TestDataSplitting:
             data_split_mode='test'
         )
         
-        # Check that the split ratio is correct (within a small margin of error)
-        expected_train_size = int(total_samples * config.TRAINING_SET_RATIO)
-        assert abs(len(train_data) - expected_train_size) <= 1
-        assert abs(len(test_data) - (total_samples - expected_train_size)) <= 1
+        # Extract unique patient IDs from train and test data
+        train_patient_ids = set(item.get('patient_id') for item in train_data if item.get('patient_id') is not None)
+        test_patient_ids = set(item.get('patient_id') for item in test_data if item.get('patient_id') is not None)
         
-        # Check that train + test = total
-        assert len(train_data) + len(test_data) == total_samples
+        # Check that the patient split ratio is correct (within a small margin of error)
+        expected_train_patients = int(total_unique_patients * config.TRAINING_SET_RATIO)
+        assert abs(len(train_patient_ids) - expected_train_patients) <= 1
+        assert abs(len(test_patient_ids) - (total_unique_patients - expected_train_patients)) <= 1
+        
+        # Check that all patients are accounted for
+        assert len(train_patient_ids) + len(test_patient_ids) == total_unique_patients
+        
+        # The total number of notes might not exactly match the split ratio anymore
+        # since we're splitting by patient, but we still check that all notes are accounted for
+        assert len(train_data) + len(test_data) == len(df)
     
-    def test_no_data_leakage(self, diagnosis_only_test_file_path, diagnosis_only_config):
-        """Test that there is no overlap between training and test sets."""
+    def test_no_patient_leakage(self, diagnosis_only_test_file_path, diagnosis_only_config):
+        """Test that there is no patient overlap between training and test sets."""
         # Load and prepare data with 'train' mode
         train_data, _ = load_and_prepare_data(
             diagnosis_only_test_file_path, 
@@ -71,12 +82,20 @@ class TestDataSplitting:
             data_split_mode='test'
         )
         
-        # Extract note_ids from train and test data
-        train_ids = set(item['note_id'] for item in train_data)
-        test_ids = set(item['note_id'] for item in test_data)
+        # Extract note_ids from train and test data (still useful to check)
+        train_note_ids = set(item['note_id'] for item in train_data)
+        test_note_ids = set(item['note_id'] for item in test_data)
         
-        # Check that there is no overlap between train and test sets
-        assert len(train_ids.intersection(test_ids)) == 0
+        # Check that there is no overlap between train and test note sets
+        assert len(train_note_ids.intersection(test_note_ids)) == 0
+        
+        # Extract patient_ids from train and test data
+        train_patient_ids = set(item.get('patient_id') for item in train_data if item.get('patient_id') is not None)
+        test_patient_ids = set(item.get('patient_id') for item in test_data if item.get('patient_id') is not None)
+        
+        # Check that there is no overlap between train and test patient sets
+        # This is the critical test for preventing data leakage
+        assert len(train_patient_ids.intersection(test_patient_ids)) == 0
     
     def test_reproducible_split(self, diagnosis_only_test_file_path, diagnosis_only_config):
         """Test that using the same random seed produces the same data split."""
@@ -96,11 +115,89 @@ class TestDataSplitting:
         )
         
         # Extract note_ids from both runs
-        train_ids1 = set(item['note_id'] for item in train_data1)
-        train_ids2 = set(item['note_id'] for item in train_data2)
+        train_note_ids1 = set(item['note_id'] for item in train_data1)
+        train_note_ids2 = set(item['note_id'] for item in train_data2)
         
-        # Check that the splits are identical
-        assert train_ids1 == train_ids2
+        # Check that the note splits are identical
+        assert train_note_ids1 == train_note_ids2
+        
+        # Extract patient_ids from both runs
+        train_patient_ids1 = set(item.get('patient_id') for item in train_data1 if item.get('patient_id') is not None)
+        train_patient_ids2 = set(item.get('patient_id') for item in train_data2 if item.get('patient_id') is not None)
+        
+        # Check that the patient splits are identical
+        assert train_patient_ids1 == train_patient_ids2
+    
+    def test_stratification(self, diagnosis_only_test_file_path, diagnosis_only_config):
+        """Test that the data split maintains similar distribution of positive relationships."""
+        import pytest
+        
+        # Load the full dataset to analyze the distribution of positive relationships
+        df = pd.read_csv(diagnosis_only_test_file_path)
+        
+        # Get the patient ID column name
+        patient_id_column = diagnosis_only_config.PATIENT_ID_COLUMN
+        relationship_gold_column = diagnosis_only_config.RELATIONSHIP_GOLD_COLUMN
+        
+        # Skip test if the necessary columns are not available
+        if relationship_gold_column not in df.columns:
+            pytest.skip(f"Relationship gold column '{relationship_gold_column}' not found in test data")
+        
+        # Identify patients with positive relationships
+        # First, parse the relationship gold column to extract positive relationships
+        # This assumes the column format is similar to what's handled in load_and_prepare_data
+        patients_with_positive = set()
+        
+        # Parse the relationship gold data to find patients with positive relationships
+        # This is a simplified version of what might be in load_and_prepare_data
+        for _, row in df.iterrows():
+            patient_id = row.get(patient_id_column)
+            if not patient_id:
+                continue
+                
+            rel_gold = row.get(relationship_gold_column)
+            if not rel_gold or pd.isna(rel_gold):
+                continue
+                
+            # If there's any relationship data for this patient, consider them positive
+            # This is a simplification; in reality, you'd parse the specific relationship format
+            patients_with_positive.add(patient_id)
+        
+        # Calculate the overall percentage of patients with positive relationships
+        total_patients = len(df[patient_id_column].unique())
+        overall_positive_percentage = len(patients_with_positive) / total_patients if total_patients > 0 else 0
+        
+        # Load the train and test splits
+        train_data, _ = load_and_prepare_data(
+            diagnosis_only_test_file_path, 
+            None,
+            diagnosis_only_config, 
+            data_split_mode='train'
+        )
+        
+        test_data, _ = load_and_prepare_data(
+            diagnosis_only_test_file_path, 
+            None,
+            diagnosis_only_config, 
+            data_split_mode='test'
+        )
+        
+        # Extract unique patient IDs from train and test data
+        train_patient_ids = set(item.get('patient_id') for item in train_data if item.get('patient_id') is not None)
+        test_patient_ids = set(item.get('patient_id') for item in test_data if item.get('patient_id') is not None)
+        
+        # Calculate the percentage of patients with positive relationships in each split
+        train_positive = len(train_patient_ids.intersection(patients_with_positive))
+        train_positive_percentage = train_positive / len(train_patient_ids) if train_patient_ids else 0
+        
+        test_positive = len(test_patient_ids.intersection(patients_with_positive))
+        test_positive_percentage = test_positive / len(test_patient_ids) if test_patient_ids else 0
+        
+        # Check that the percentages are approximately equal (within a reasonable margin)
+        # The margin is larger for smaller datasets
+        margin = 0.15  # 15% margin for small test datasets
+        assert pytest.approx(train_positive_percentage, abs=margin) == overall_positive_percentage
+        assert pytest.approx(test_positive_percentage, abs=margin) == overall_positive_percentage
 
 class TestModelTraining:
     """Tests to ensure model training is correct and reproducible."""

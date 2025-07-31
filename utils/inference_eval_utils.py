@@ -229,24 +229,87 @@ def load_and_prepare_data(dataset_path, num_samples, config=None, data_split_mod
         
         # Apply train/test split if requested
         if data_split_mode != 'all' and hasattr(config, 'TRAINING_SET_RATIO') and hasattr(config, 'DATA_SPLIT_RANDOM_SEED'):
+            from sklearn.model_selection import train_test_split
+            
             # Get the split ratio and random seed from config
             train_ratio = config.TRAINING_SET_RATIO
             random_seed = config.DATA_SPLIT_RANDOM_SEED
             
-            # Calculate the split index
-            split_idx = int(len(df) * train_ratio)
+            # Check if we have a patient ID column to use for splitting
+            patient_id_column = getattr(config, 'PATIENT_ID_COLUMN', None)
             
-            # Sort the dataframe to ensure consistent splits
-            # We use the index as the sort key to maintain reproducibility
-            df = df.sort_index(kind='stable')
-            
-            # Apply the split
-            if data_split_mode == 'train':
-                df = df.iloc[:split_idx]
-                print(f"Using training split: {len(df)} records (first {train_ratio*100:.0f}%)")
-            elif data_split_mode == 'test':
-                df = df.iloc[split_idx:]
-                print(f"Using testing split: {len(df)} records (last {(1-train_ratio)*100:.0f}%)")
+            if patient_id_column and patient_id_column in df.columns:
+                # Patient-based splitting to prevent data leakage
+                print(f"Using patient-based splitting to prevent data leakage")
+                
+                # Get unique patient IDs
+                unique_patients = df[patient_id_column].unique()
+                
+                # Identify patients with positive relationships for stratification
+                patients_with_positive = set()
+                relationship_gold_col = getattr(config, 'RELATIONSHIP_GOLD_COLUMN', None)
+                
+                if relationship_gold_col and relationship_gold_col in df.columns:
+                    # This is a simplified approach - in a real implementation, 
+                    # you would parse the relationship gold data more carefully
+                    for _, row in df.iterrows():
+                        patient_id = row.get(patient_id_column)
+                        rel_gold = row.get(relationship_gold_col)
+                        if patient_id and pd.notna(rel_gold) and rel_gold:
+                            patients_with_positive.add(patient_id)
+                    
+                    # Create stratification labels: 1 for patients with positive relationships, 0 for others
+                    stratify_labels = [1 if p in patients_with_positive else 0 for p in unique_patients]
+                    
+                    # Only stratify if we have both positive and negative examples
+                    if len(set(stratify_labels)) > 1:
+                        # Split patient IDs into train and test sets with stratification
+                        train_patients, test_patients = train_test_split(
+                            unique_patients,
+                            test_size=1-train_ratio,
+                            random_state=random_seed,
+                            stratify=stratify_labels
+                        )
+                        print(f"Using stratified split to maintain similar distribution of positive relationships")
+                    else:
+                        # Fall back to non-stratified split if all patients are in the same class
+                        train_patients, test_patients = train_test_split(
+                            unique_patients,
+                            test_size=1-train_ratio,
+                            random_state=random_seed
+                        )
+                else:
+                    # No relationship gold column for stratification, use regular split
+                    train_patients, test_patients = train_test_split(
+                        unique_patients,
+                        test_size=1-train_ratio,
+                        random_state=random_seed
+                    )
+                
+                # Filter the dataframe based on the split
+                if data_split_mode == 'train':
+                    df = df[df[patient_id_column].isin(train_patients)]
+                    print(f"Using training split: {len(df)} records from {len(train_patients)} patients (approximately {train_ratio*100:.0f}% of patients)")
+                elif data_split_mode == 'test':
+                    df = df[df[patient_id_column].isin(test_patients)]
+                    print(f"Using testing split: {len(df)} records from {len(test_patients)} patients (approximately {(1-train_ratio)*100:.0f}% of patients)")
+            else:
+                # Fall back to the original row-based splitting if no patient ID column is available
+                print(f"Warning: No patient ID column available for patient-based splitting. Falling back to row-based splitting.")
+                
+                # Calculate the split index
+                split_idx = int(len(df) * train_ratio)
+                
+                # Sort the dataframe to ensure consistent splits
+                df = df.sort_index(kind='stable')
+                
+                # Apply the split
+                if data_split_mode == 'train':
+                    df = df.iloc[:split_idx]
+                    print(f"Using training split: {len(df)} records (first {train_ratio*100:.0f}%)")
+                elif data_split_mode == 'test':
+                    df = df.iloc[split_idx:]
+                    print(f"Using testing split: {len(df)} records (last {(1-train_ratio)*100:.0f}%)")
         
         # If a specific number of samples is requested, limit to that
         # This happens AFTER the train/test split, so INFERENCE_SAMPLES limits the samples from the selected split
