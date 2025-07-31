@@ -89,13 +89,15 @@ class OpenAIExtractor(BaseRelationExtractor):
         category = category.lower()
         return self.category_mapping.get(category, "symptom")
     
-    def extract(self, text, entities=None):
+    def extract(self, text, entities=None, note_id=None, patient_id=None):
         """
         Extract relationships using OpenAI's API.
         
         Args:
             text (str): The clinical note text.
             entities (tuple, optional): A tuple of (entities_list, dates) if already extracted.
+            note_id (int, optional): The ID of the note being processed.
+            patient_id (str, optional): The ID of the patient the note belongs to.
             
         Returns:
             list: A list of dictionaries, each representing a relationship:

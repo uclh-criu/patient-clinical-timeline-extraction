@@ -13,7 +13,7 @@ ENTITY_MODE = "multi_entity"
 # --- Execution Settings --- #
 # Controls the extraction method to use for the relation extraction task.
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'bert'
+EXTRACTION_METHOD = 'openai'
 TRAINING_SET_RATIO = 0.8 # The ratio of data to be used for the training set. The rest will be used for the test/inference set.
 DATA_SPLIT_RANDOM_SEED = 42 # A fixed random seed to ensure the train/test split is always the same.
 INFERENCE_SAMPLES = None # Limits the number of samples used from the test set. Set to None to use all test samples.
