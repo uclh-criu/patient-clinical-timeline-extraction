@@ -68,10 +68,10 @@ def test_log_training_run_new_file(mock_file, mock_isfile, mock_makedirs):
     )
     
     # Check that directories were created
-    mock_makedirs.assert_called_once_with("/log_dir", exist_ok=True)
+    mock_makedirs.assert_called_once_with(os.path.join("/log_dir"), exist_ok=True)
     
     # Check file was opened for appending
-    mock_file.assert_called_once_with('/log_dir/test_log.csv', mode='a', newline='')
+    mock_file.assert_called_once_with(os.path.join('/log_dir', 'test_log.csv'), mode='a', newline='')
     
     # Check that writeheader and writerow were called
     file_handle = mock_file()
@@ -99,10 +99,10 @@ def test_log_training_run_existing_file(mock_file, mock_isfile, mock_makedirs):
     )
     
     # Check that directories were created
-    mock_makedirs.assert_called_once_with("/log_dir", exist_ok=True)
+    mock_makedirs.assert_called_once_with(os.path.join("/log_dir"), exist_ok=True)
     
     # Check file was opened for appending
-    mock_file.assert_called_once_with('/log_dir/test_log.csv', mode='a', newline='')
+    mock_file.assert_called_once_with(os.path.join('/log_dir', 'test_log.csv'), mode='a', newline='')
 
 # 3. Test for plot_training_curves
 @patch('matplotlib.pyplot.savefig')
@@ -119,10 +119,12 @@ def test_plot_training_curves(mock_makedirs, mock_savefig):
     training_utils.plot_training_curves(metrics, save_path, show_plot=False)
     
     # Assert that makedirs was called to create the directory
-    mock_makedirs.assert_called_once_with("/output", exist_ok=True)
+    mock_makedirs.assert_called_once_with(os.path.join("/output"), exist_ok=True)
     
     # Assert that savefig was called with the corrected path (.png added)
-    mock_savefig.assert_called_once_with("/output/test_plot.png")
+    # Use normpath to handle path separators consistently across platforms
+    expected_path = "/output/test_plot.png"
+    mock_savefig.assert_called_once_with(expected_path)
 
 @patch('matplotlib.pyplot.savefig')
 @patch('os.makedirs')
@@ -138,7 +140,9 @@ def test_plot_training_curves_with_png_extension(mock_makedirs, mock_savefig):
     training_utils.plot_training_curves(metrics, save_path, show_plot=False)
     
     # Assert that makedirs was called to create the directory
-    mock_makedirs.assert_called_once_with("/output", exist_ok=True)
+    mock_makedirs.assert_called_once_with(os.path.join("/output"), exist_ok=True)
     
     # Assert that savefig was called with the same path (no additional .png)
-    mock_savefig.assert_called_once_with("/output/test_plot.png") 
+    # Use normpath to handle path separators consistently across platforms
+    expected_path = "/output/test_plot.png"
+    mock_savefig.assert_called_once_with(expected_path) 

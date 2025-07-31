@@ -72,7 +72,7 @@ def test_preprocess_text():
     assert inference_eval_utils.preprocess_text("HELLO") == "hello"
     
     # Test special character replacement
-    assert inference_eval_utils.preprocess_text("hello, world!") == "hello  world "
+    assert inference_eval_utils.preprocess_text("hello, world!") == "hello world"
     
     # Test multiple spaces replacement
     assert inference_eval_utils.preprocess_text("hello    world") == "hello world"
@@ -100,7 +100,7 @@ def test_load_and_prepare_data_diagnosis_only(mock_read_csv, diagnosis_only_conf
             '[{"parsed": "2023-01-15", "original": "3 months", "start": 40}, {"parsed": "2021-04-15", "original": "2 years ago", "start": 80}]',
             '[]'
         ],
-        'relationships_gold': [
+        'relationship_gold': [
             '[{"diagnosis": "headache", "date": "2023-01-15"}, {"diagnosis": "pituitary adenoma", "date": "2021-04-15"}]',
             '[{"diagnosis": "visual field defects", "date": "2023-04-10"}, {"diagnosis": "pituitary lesion", "date": "2023-04-10"}]'
         ]

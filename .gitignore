@@ -29,6 +29,6 @@ model.safetensors
 # Ignore all PyTorch model files
 *.pt
 # Ignore all training curve images
-*training_curves.png
+*.png
 # Ignore all training log files
 *_log.csv

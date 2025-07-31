@@ -77,8 +77,20 @@ def transform_python_to_json(python_string):
     Returns:
         A valid JSON string with all strings double-quoted
     """
-    if not python_string or pd.isna(python_string):
-        return "[]"  # Return empty JSON array if input is empty or NaN
+    # Special case for pd.NA which can't be used in boolean expressions
+    if isinstance(python_string, type(pd.NA)):
+        return "[]"
+    
+    # Handle None or empty string
+    if python_string is None or python_string == "":
+        return "[]"
+    
+    # Handle other NA/NaN values
+    try:
+        if pd.isna(python_string):
+            return "[]"
+    except:
+        pass
         
     # Handle datetime.date objects by converting them to ISO format strings
     # Example: datetime.date(2019, 4, 18) -> "2019-04-18"

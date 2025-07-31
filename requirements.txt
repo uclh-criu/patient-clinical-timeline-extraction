@@ -1,10 +1,12 @@
 # Core ML/Data Science packages
-torch==2.6.0
+torch==2.3.1
+torchvision==0.18.1
 numpy==1.25.2
 pandas==2.2.3
 matplotlib==3.9.4
 scikit-learn==1.6.1
 tqdm==4.67.1
+scipy==1.19.3
 
 # NLP and Transformers
 transformers==4.51.1

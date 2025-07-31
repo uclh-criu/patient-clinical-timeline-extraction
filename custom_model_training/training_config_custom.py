@@ -9,7 +9,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  # Device 
 
 ENTITY_MODE = 'multi_entity'  # Entity mode: 'diagnosis_only' or 'multi_entity'
 TRAINING_DATA_PATH = 'data/nph.csv'  # Path to training data
-VOCAB_PATH = 'custom_model_training/vocabs/nph_vocab.pt'  # Path to vocabulary file for this dataset
+VOCAB_PATH = 'custom_model_training/vocabs/clinicalbert_vocab.pt'  # Path to vocabulary file for this dataset
 MAX_DISTANCE = 200 # Maximum distance between diagnosis and date to consider
 MAX_CONTEXT_LEN = [32, 64, 128]  # Maximum context length for text window around entities
 VOCAB_SIZE = 8000  # Maximum vocabulary size
