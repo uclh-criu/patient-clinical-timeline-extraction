@@ -25,11 +25,11 @@ from utils.inference_eval_utils import load_and_prepare_data, preprocess_note_fo
 
 # ===== CONFIGURABLE VARIABLES =====
 # Path to the dataset to analyze - change this to point to your data file
-DATA_PATH = 'data/nph.csv'
+DATA_PATH = 'data/synthetic_multi_enhanced_final.csv'
 
 # Entity mode to use for analysis - must match the structure of your data
 # Options: 'multi_entity' (uses SNOMED_COLUMN and UMLS_COLUMN) or 'diagnosis_only' (uses DIAGNOSES_COLUMN)
-ENTITY_MODE = 'diagnosis_only'
+ENTITY_MODE = 'multi_entity'
 
 # Maximum distance between entity and date to consider for relationship analysis
 MAX_DISTANCE = 500
@@ -483,13 +483,14 @@ def analyze_and_report_stats(prepared_data, relationship_gold, config, split_nam
     
     return all_stats
 
-def compare_data_splits(prepared_data, relationship_gold):
+def compare_data_splits(data_path, num_samples=None):
     """
     Perform comparative analysis between train, validation, and test splits.
+    Uses the same data loading and splitting logic as the main pipeline.
     
     Args:
-        prepared_data: List of dictionaries containing preprocessed notes for the full dataset
-        relationship_gold: List of gold standard relationships for the full dataset
+        data_path: Path to the dataset
+        num_samples: Number of samples to analyze (None for all)
     """
     print(f"\n{'='*50}")
     print("COMPARATIVE ANALYSIS OF TRAIN/VAL/TEST SPLITS")
@@ -499,70 +500,129 @@ def compare_data_splits(prepared_data, relationship_gold):
     if SAVE_OUTPUT:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Split the full dataset into train and test sets (80/20 split)
-    # First, get a list of unique note_ids
-    note_ids = list(set([note['note_id'] for note in prepared_data]))
+    # Override config.ENTITY_MODE with our local setting to ensure consistent behavior
+    original_entity_mode = config.ENTITY_MODE
+    config.ENTITY_MODE = ENTITY_MODE
     
-    # Split the note_ids into train and test sets based on config.TRAINING_SET_RATIO
-    train_test_split_ratio = 1 - config.TRAINING_SET_RATIO
-    all_train_note_ids, test_note_ids = train_test_split(
-        note_ids, 
-        test_size=train_test_split_ratio, 
-        random_state=config.DATA_SPLIT_RANDOM_SEED
-    )
-    
-    # Split the data based on note_ids
-    train_data = [note for note in prepared_data if note['note_id'] in all_train_note_ids]
-    test_data = [note for note in prepared_data if note['note_id'] in test_note_ids]
-    
-    # Split the gold standard relationships based on note_ids
-    train_rel_gold = [rel for rel in relationship_gold if rel['note_id'] in all_train_note_ids]
-    test_rel_gold = [rel for rel in relationship_gold if rel['note_id'] in test_note_ids]
-    
-    # Create validation split from training data
-    print("\nCreating validation split from training data...")
-    
-    # Split the all_train_note_ids into train and validation sets (80/20 split)
-    train_note_ids, val_note_ids = train_test_split(
-        all_train_note_ids, 
-        test_size=0.2, 
-        random_state=config.DATA_SPLIT_RANDOM_SEED
-    )
-    
-    # Split the data based on note_ids
-    val_data = [note for note in train_data if note['note_id'] in val_note_ids]
-    
-    # If validation is a separate split, use only the training portion for train analysis
-    # Otherwise, use the full training data (including validation) for train analysis
-    if VAL_AS_SEPARATE_SPLIT:
-        new_train_data = [note for note in train_data if note['note_id'] in train_note_ids]
-        # Split the gold standard relationships based on note_ids
-        val_rel_gold = [rel for rel in train_rel_gold if rel['note_id'] in val_note_ids]
-        new_train_rel_gold = [rel for rel in train_rel_gold if rel['note_id'] in train_note_ids]
+    # Load training data using the canonical pipeline function
+    print("\nLoading training data using pipeline's data splitting logic...")
+    if ENTITY_MODE.lower() in ['diagnosis_only', 'disorder_only']:
+        train_data, train_rel_gold = load_and_prepare_data(
+            data_path, num_samples, config, data_split_mode='train'
+        )
     else:
-        # Use full training data for analysis (validation is just a subset used for reporting)
-        new_train_data = train_data
-        new_train_rel_gold = train_rel_gold
-        # Still create validation split for comparative analysis
+        train_data, train_entity_gold, train_rel_gold, _ = load_and_prepare_data(
+            data_path, num_samples, config, data_split_mode='train'
+        )
+    
+    # Load test data using the canonical pipeline function
+    print("\nLoading test data using pipeline's data splitting logic...")
+    if ENTITY_MODE.lower() in ['diagnosis_only', 'disorder_only']:
+        test_data, test_rel_gold = load_and_prepare_data(
+            data_path, num_samples, config, data_split_mode='test'
+        )
+    else:
+        test_data, test_entity_gold, test_rel_gold, _ = load_and_prepare_data(
+            data_path, num_samples, config, data_split_mode='test'
+        )
+    
+    # Create validation split from training data using patient-based splitting
+    # This mimics the logic in custom_model_training/train_custom_model.py
+    print("\nCreating validation split from training data using patient-based splitting...")
+    
+    # Extract patient IDs from training data
+    patient_ids = []
+    for note in train_data:
+        patient_id = note.get('patient_id')
+        if patient_id is not None:
+            patient_ids.append(patient_id)
+    
+    # Get unique patient IDs
+    unique_patient_ids = list(set(patient_id for patient_id in patient_ids if patient_id is not None))
+    
+    if len(unique_patient_ids) > 1:
+        print(f"Found {len(unique_patient_ids)} unique patients for patient-based validation split")
+        
+        # Create a stratification array based on whether patients have positive examples
+        patients_with_positive = set()
+        
+        # Find patients with positive examples
+        for rel in train_rel_gold:
+            patient_id = rel.get('patient_id')
+            if patient_id is not None:
+                patients_with_positive.add(patient_id)
+        
+        # Create stratification labels: 1 for patients with positive examples, 0 for others
+        stratify_labels = [1 if p in patients_with_positive else 0 for p in unique_patient_ids]
+        
+        # Check if stratification is possible (need at least 2 members in each class)
+        label_counts = {}
+        for label in stratify_labels:
+            label_counts[label] = label_counts.get(label, 0) + 1
+        
+        min_count = min(label_counts.values()) if label_counts else 0
+        
+        # Only stratify if we have both positive and negative examples AND at least 2 members in each class
+        if len(set(stratify_labels)) > 1 and min_count >= 2:
+            print("Using stratified patient-based splitting for validation set")
+            train_patients, val_patients = train_test_split(
+                unique_patient_ids,
+                test_size=0.2,
+                random_state=config.DATA_SPLIT_RANDOM_SEED,
+                stratify=stratify_labels
+            )
+        else:
+            print("Using non-stratified patient-based splitting for validation set (all patients have same label)")
+            train_patients, val_patients = train_test_split(
+                unique_patient_ids,
+                test_size=0.2,
+                random_state=config.DATA_SPLIT_RANDOM_SEED
+            )
+        
+        # Split the data based on patient IDs
+        new_train_data = [note for note in train_data if note.get('patient_id') in train_patients]
+        val_data = [note for note in train_data if note.get('patient_id') in val_patients]
+        
+        # Split the gold standard relationships based on patient IDs
+        new_train_rel_gold = [rel for rel in train_rel_gold if rel.get('patient_id') in train_patients]
+        val_rel_gold = [rel for rel in train_rel_gold if rel.get('patient_id') in val_patients]
+    else:
+        # Fall back to note_id-based splitting if patient IDs are not available
+        print("Warning: Patient IDs not available or only one patient found. Falling back to note-based splitting.")
+        
+        # Get a list of unique note_ids
+        note_ids = list(set([note['note_id'] for note in train_data]))
+        
+        # Split the note_ids into train and validation sets (80/20 split)
+        train_note_ids, val_note_ids = train_test_split(
+            note_ids, 
+            test_size=0.2, 
+            random_state=config.DATA_SPLIT_RANDOM_SEED
+        )
+        
+        # Split the data based on note_ids
+        new_train_data = [note for note in train_data if note['note_id'] in train_note_ids]
+        val_data = [note for note in train_data if note['note_id'] in val_note_ids]
+        
+        # Split the gold standard relationships based on note_ids
+        new_train_rel_gold = [rel for rel in train_rel_gold if rel['note_id'] in train_note_ids]
         val_rel_gold = [rel for rel in train_rel_gold if rel['note_id'] in val_note_ids]
     
     print(f"Training set: {len(new_train_data)} notes, {len(new_train_rel_gold)} gold relationships")
     print(f"Validation set: {len(val_data)} notes, {len(val_rel_gold)} gold relationships")
     print(f"Test set: {len(test_data)} notes, {len(test_rel_gold)} gold relationships")
     
-    # Run analysis on each split without verbose output
-    print("\nAnalyzing data splits...")
-    train_stats = analyze_and_report_stats(new_train_data, new_train_rel_gold, config, 'train', verbose=False)
-    val_stats = analyze_and_report_stats(val_data, val_rel_gold, config, 'val', verbose=False)
-    test_stats = analyze_and_report_stats(test_data, test_rel_gold, config, 'test', verbose=False)
+    # Restore the original entity mode in config
+    config.ENTITY_MODE = original_entity_mode
     
-    # Generate comparative visualizations
-    generate_comparative_visualizations(train_stats, val_stats, test_stats)
-    
+    # Return the data splits for analysis
     return {
-        'train': train_stats,
-        'val': val_stats,
-        'test': test_stats
+        'train_data': new_train_data,
+        'train_rel_gold': new_train_rel_gold,
+        'val_data': val_data,
+        'val_rel_gold': val_rel_gold,
+        'test_data': test_data,
+        'test_rel_gold': test_rel_gold
     }
 
 def generate_comparative_visualizations(train_stats, val_stats, test_stats):
@@ -769,7 +829,7 @@ def main():
     
     # Load and prepare the full dataset first
     print("Loading and preparing full dataset...")
-    result = load_and_prepare_data(DATA_PATH, NUM_SAMPLES, config)
+    result = load_and_prepare_data(DATA_PATH, NUM_SAMPLES, config, data_split_mode='all')
     
     # Handle different return signatures based on ENTITY_MODE
     if ENTITY_MODE.lower() in ['diagnosis_only', 'disorder_only']:
@@ -784,9 +844,37 @@ def main():
     consolidated_stats['full_dataset_analysis'] = full_stats
     
     if ENABLE_SPLIT_COMPARISON:
-        # Perform comparative analysis between train/val/test splits using the already loaded data
+        # Perform comparative analysis between train/val/test splits
+        # This now calls load_and_prepare_data directly with different data_split_mode values
         print("\nPerforming comparative analysis across data splits...")
-        all_stats = compare_data_splits(prepared_data, relationship_gold)
+        
+        # Run the comparison using the canonical pipeline splitting logic
+        all_stats = {}
+        
+        # Get the train, validation, and test splits using the pipeline's splitting logic
+        split_results = compare_data_splits(DATA_PATH, NUM_SAMPLES)
+        
+        # Analyze the train split
+        print("\nAnalyzing training split...")
+        train_stats = analyze_and_report_stats(split_results['train_data'], split_results['train_rel_gold'], 
+                                              config, 'train', verbose=False)
+        all_stats['train'] = train_stats
+        
+        # Analyze the validation split
+        print("\nAnalyzing validation split...")
+        val_stats = analyze_and_report_stats(split_results['val_data'], split_results['val_rel_gold'], 
+                                            config, 'val', verbose=False)
+        all_stats['val'] = val_stats
+        
+        # Analyze the test split
+        print("\nAnalyzing test split...")
+        test_stats = analyze_and_report_stats(split_results['test_data'], split_results['test_rel_gold'], 
+                                             config, 'test', verbose=False)
+        all_stats['test'] = test_stats
+        
+        # Generate comparative visualizations
+        generate_comparative_visualizations(train_stats, val_stats, test_stats)
+        
         consolidated_stats['split_analysis'] = all_stats
         
         # Add comparative summary metrics
