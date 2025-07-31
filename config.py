@@ -3,7 +3,7 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used for inference, evaluation, and timeline generation.
 # Valid options: 'imaging', 'synthetic', 'synthetic_multi', 'nph'
-DATA_SOURCE = 'synthetic_multi'
+DATA_SOURCE = 'nph'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to use for the relation extraction task.
