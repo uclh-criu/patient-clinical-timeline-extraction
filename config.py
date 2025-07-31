@@ -18,6 +18,39 @@ TRAINING_SET_RATIO = 0.8 # The ratio of data to be used for the training set. Th
 DATA_SPLIT_RANDOM_SEED = 42 # A fixed random seed to ensure the train/test split is always the same.
 INFERENCE_SAMPLES = None # Limits the number of samples used from the test set. Set to None to use all test samples.
 
+# --- Custom Extractor Parameters --- #
+MODEL_PATH = 'custom_model_training/models/synthetic_custom.pt'  
+VOCAB_PATH = 'custom_model_training/vocabs/clinicalbert_vocab.pt'
+PREDICTION_MAX_DISTANCE = 500 # Max char distance used by custom_extractor when finding candidate pairs
+PREDICTION_MAX_CONTEXT_LEN = 512 # Max sequence length used by custom_extractor when creating input tensors
+CUSTOM_CONFIDENCE_THRESHOLD = 0.5 # Confidence threshold for custom model predictions
+USE_PRETRAINED_EMBEDDINGS = True # Whether to use pre-trained embeddings from a BERT model
+BERT_MODEL_NAME = 'emilyalsentzer/Bio_ClinicalBERT' # The BERT model to use for embeddings
+PRETRAINED_EMBEDDINGS_PATH = 'custom_model_training/vocabs/clinicalbert_embeddings.pt' # Path to pre-trained embeddings
+
+# --- Naive (proximity) Extractor Parameters --- #
+PROXIMITY_MAX_DISTANCE = 200
+
+# --- BERT Extractor Parameters --- #
+BERT_MODEL_PATH = './bert_model_training/models'
+BERT_CONFIDENCE_THRESHOLD = 0.185  # Confidence threshold for BERT predictions
+
+# --- Llama Extractor Parameters --- #
+LLAMA_MODEL_PATH = './Llama-3.2-3B-Instruct'
+
+# --- OpenAI Extractor Parameters --- #
+OPENAI_MODEL = 'gpt-4o'
+
+# --- RelCAT Extractor Parameters --- #
+MEDCAT_MODEL_PATH = 'extractors/relcat/relcat_model.pt'  # Example Path
+MEDCAT_CDB_PATH = 'extractors/relcat/cdb.dat'        # Example Path
+
+# --- Relative Date Extraction LLM Settings --- #
+ENABLE_RELATIVE_DATE_EXTRACTION = False      # Whether to extract relative dates
+RELATIVE_DATE_LLM_MODEL = 'openai'           # Which LLM to use: 'openai' or 'llama'
+RELATIVE_DATE_OPENAI_MODEL = 'gpt-3.5-turbo' # OpenAI model for relative date extraction (cheaper than gpt-4o)
+RELATIVE_DATE_CONTEXT_WINDOW = 2500         # Maximum context window to send to LLM for date extraction
+
 # --- Data File Paths --- #
 SYNTHETIC_DATA_PATH = 'data/synthetic.csv'
 IMAGING_DATA_PATH = 'data/imaging.csv'
@@ -36,38 +69,8 @@ DIAGNOSES_COLUMN = 'extracted_disorders'            # Used in diagnosis_only mod
 SNOMED_COLUMN = 'extracted_snomed_entities'         # Used in multi_entity mode
 UMLS_COLUMN = 'extracted_umls_entities'             # Used in multi_entity mode
 
-# --- Naive (proximity) Extractor Parameters --- #
-PROXIMITY_MAX_DISTANCE = 200  
-
-# --- Custom Extractor Parameters --- #
-MODEL_PATH = 'custom_model_training/models/imaging_custom.pt'  
-VOCAB_PATH = 'custom_model_training/vocabs/imaging_vocab.pt'
-PREDICTION_MAX_DISTANCE = 500 # Max char distance used by custom_extractor when finding candidate pairs
-PREDICTION_MAX_CONTEXT_LEN = 512 # Max sequence length used by custom_extractor when creating input tensors
-CUSTOM_CONFIDENCE_THRESHOLD = 0.5 # Confidence threshold for custom model predictions
-
-# --- BERT Extractor Parameters --- #
-BERT_MODEL_PATH = './bert_model_training/models'
-BERT_CONFIDENCE_THRESHOLD = 0.185  # Confidence threshold for BERT predictions
-
-# --- Llama Extractor Parameters --- #
-LLAMA_MODEL_PATH = './Llama-3.2-3B-Instruct'
-
-# --- OpenAI Extractor Parameters --- #
-OPENAI_MODEL = 'gpt-4o'
-
-# --- RelCAT Extractor Parameters --- #
-MEDCAT_MODEL_PATH = 'extractors/relcat/relcat_model.pt'  # Example Path
-MEDCAT_CDB_PATH = 'extractors/relcat/cdb.dat'        # Example Path
-
 # Output directory for timeline visualizations
 TIMELINE_OUTPUT_DIR = 'experiment_outputs/timelines'
-
-# --- Relative Date Extraction LLM Settings --- #
-ENABLE_RELATIVE_DATE_EXTRACTION = False      # Whether to extract relative dates
-RELATIVE_DATE_LLM_MODEL = 'openai'           # Which LLM to use: 'openai' or 'llama'
-RELATIVE_DATE_OPENAI_MODEL = 'gpt-3.5-turbo' # OpenAI model for relative date extraction (cheaper than gpt-4o)
-RELATIVE_DATE_CONTEXT_WINDOW = 2500         # Maximum context window to send to LLM for date extraction
 
 # --- Test Data Paths --- #
 # These paths point to the datasets used for automated testing

@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import Dataset
 
 class ClinicalNoteDataset(Dataset):
-    def __init__(self, features, labels, vocab, MAX_CONTEXT_LEN, MAX_DISTANCE, entity_category_map=None):
+    def __init__(self, features, labels, vocab, MAX_CONTEXT_LEN, MAX_DISTANCE, entity_category_map=None, tokenizer=None):
         self.features = features
         self.labels = labels
         self.vocab = vocab
@@ -18,27 +18,83 @@ class ClinicalNoteDataset(Dataset):
             'procedure': 2,
             'medication': 3
         }
+        
+        # Determine the unknown token format used in this vocabulary
+        # Check for different possible unknown token formats
+        self.unk_token = None
+        for unk_format in ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK']:
+            if unk_format in self.vocab.word2idx:
+                self.unk_token = unk_format
+                break
+        
+        # If no unknown token found, use the first one as default or raise error
+        if self.unk_token is None:
+            if hasattr(self.vocab, 'word2idx') and len(self.vocab.word2idx) > 1:
+                # Use the second token (usually the unknown token after padding)
+                self.unk_token = list(self.vocab.word2idx.keys())[1]
+                print(f"Warning: No standard unknown token found. Using '{self.unk_token}' as unknown token.")
+            else:
+                raise ValueError("Could not find an unknown token in the vocabulary.")
+        
+        # Store the external tokenizer if provided
+        self.tokenizer = tokenizer
+        
+        # Determine the padding token
+        self.pad_token = None
+        for pad_format in ['<pad>', '[PAD]', '<PAD>', 'pad', 'PAD']:
+            if pad_format in self.vocab.word2idx:
+                self.pad_token = pad_format
+                break
+        
+        # If no padding token found, use the first one as default
+        if self.pad_token is None:
+            if hasattr(self.vocab, 'word2idx') and len(self.vocab.word2idx) > 0:
+                self.pad_token = list(self.vocab.word2idx.keys())[0]
+                print(f"Warning: No standard padding token found. Using '{self.pad_token}' as padding token.")
 
     def __len__(self):
         return len(self.labels)
+    
+    def tokenize(self, text):
+        """
+        Tokenize text consistently with the vocabulary.
+        If an external tokenizer is provided, use it. Otherwise, use simple whitespace tokenization.
+        """
+        if self.tokenizer:
+            # Use the provided tokenizer
+            tokens = self.tokenizer.tokenize(text)
+            # Convert tokens to indices
+            indices = []
+            for token in tokens:
+                if token in self.vocab.word2idx:
+                    indices.append(self.vocab.word2idx[token])
+                else:
+                    indices.append(self.vocab.word2idx[self.unk_token])
+            return indices
+        else:
+            # Simple whitespace tokenization
+            indices = []
+            for word in text.split():
+                if word in self.vocab.word2idx:
+                    indices.append(self.vocab.word2idx[word])
+                else:
+                    indices.append(self.vocab.word2idx[self.unk_token])
+            return indices
     
     def __getitem__(self, idx):
         feature = self.features[idx]
         label = self.labels[idx]
         
-        # Convert words to indices
-        context_indices = []
-        for word in feature['context'].split():
-            if word in self.vocab.word2idx:
-                context_indices.append(self.vocab.word2idx[word])
-            else:
-                context_indices.append(self.vocab.word2idx['<unk>'])
+        # Convert text to token indices
+        context_indices = self.tokenize(feature['context'])
         
         # Pad or truncate to MAX_CONTEXT_LEN
         if len(context_indices) > self.MAX_CONTEXT_LEN:
             context_indices = context_indices[:self.MAX_CONTEXT_LEN]
         else:
-            padding = [0] * (self.MAX_CONTEXT_LEN - len(context_indices))
+            # Get padding index (usually 0)
+            pad_idx = self.vocab.word2idx[self.pad_token] if self.pad_token in self.vocab.word2idx else 0
+            padding = [pad_idx] * (self.MAX_CONTEXT_LEN - len(context_indices))
             context_indices.extend(padding)
         
         # Additional features

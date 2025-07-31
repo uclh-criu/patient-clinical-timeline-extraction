@@ -799,7 +799,7 @@ def preprocess_note_for_prediction(note, diagnoses, dates, MAX_DISTANCE=500):
     
     return features
 
-def create_prediction_dataset(features, vocab, device, max_distance, max_context_len):
+def create_prediction_dataset(features, vocab, device, max_distance, max_context_len, tokenizer=None):
     """Convert preprocessed features into model-ready tensors
     
     Args:
@@ -808,6 +808,7 @@ def create_prediction_dataset(features, vocab, device, max_distance, max_context
         device (torch.device): Device to place tensors on
         max_distance (int): Maximum distance value for normalization
         max_context_len (int): Maximum context length for padding/truncation
+        tokenizer (object, optional): Tokenizer object to use for tokenization
         
     Returns:
         list: List of tensor dictionaries ready for model input
@@ -846,16 +847,39 @@ def create_prediction_dataset(features, vocab, device, max_distance, max_context
         feature_unknown_words = 0
         feature_total_words = 0
         
-        for word in feature['context'].split():
-            feature_total_words += 1
-            total_words_count += 1
-            
-            if word in vocab.word2idx:
-                context_indices.append(vocab.word2idx[word])
-            else:
-                context_indices.append(vocab.word2idx['<unk>'])
-                feature_unknown_words += 1
-                unknown_words_count += 1
+        # Determine the unknown token to use
+        unk_token = '<unk>'  # Default
+        for token in ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK']:
+            if token in vocab.word2idx:
+                unk_token = token
+                break
+        
+        # Use the tokenizer if provided, otherwise use simple whitespace tokenization
+        if tokenizer:
+            # Use the provided tokenizer
+            tokens = tokenizer.tokenize(feature['context'])
+            for token in tokens:
+                feature_total_words += 1
+                total_words_count += 1
+                
+                if token in vocab.word2idx:
+                    context_indices.append(vocab.word2idx[token])
+                else:
+                    context_indices.append(vocab.word2idx[unk_token])
+                    feature_unknown_words += 1
+                    unknown_words_count += 1
+        else:
+            # Simple whitespace tokenization
+            for word in feature['context'].split():
+                feature_total_words += 1
+                total_words_count += 1
+                
+                if word in vocab.word2idx:
+                    context_indices.append(vocab.word2idx[word])
+                else:
+                    context_indices.append(vocab.word2idx[unk_token])
+                    feature_unknown_words += 1
+                    unknown_words_count += 1
         
         """
         if show_details:

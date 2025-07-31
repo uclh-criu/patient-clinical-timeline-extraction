@@ -57,7 +57,12 @@ def generate_hyperparameter_grid(config_module):
         for key, value in vars(config_module).items():
             if key.startswith('__'):
                 continue
-            config[key] = value
+            
+            # Make sure to include the new embedding parameters
+            if key == 'USE_PRETRAINED_EMBEDDINGS' or key == 'PRETRAINED_EMBEDDINGS_PATH':
+                config[key] = value
+            else:
+                config[key] = value
         
         # Override with the current combination
         for i, key in enumerate(keys):
@@ -123,6 +128,8 @@ def log_training_run(model_path, hyperparams, metrics, dataset_name, entity_mode
             'BATCH_SIZE', 'LEARNING_RATE', 'NUM_EPOCHS', 'DROPOUT',
             'USE_DISTANCE_FEATURE', 'USE_POSITION_FEATURE', 'ENTITY_CATEGORY_EMBEDDING_DIM',
             'USE_WEIGHTED_LOSS', 'POS_WEIGHT',
+            # Embedding parameters
+            'USE_PRETRAINED_EMBEDDINGS', 'PRETRAINED_EMBEDDINGS_PATH',
             # Dataset statistics
             'train_examples', 'val_examples', 'positive_examples_pct'
         ]

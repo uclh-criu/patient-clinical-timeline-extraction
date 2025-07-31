@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 import time
 import random
 import numpy as np
+from transformers import AutoTokenizer
 
 # Add parent directory to path to allow importing from models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -107,12 +108,42 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         criterion = nn.BCELoss()
         print("Using standard BCE loss")
     
+    # Check if we should use pre-trained embeddings
+    pretrained_embeddings = None
+    if config.get('USE_PRETRAINED_EMBEDDINGS', False):
+        pretrained_embeddings_path = os.path.join(project_root, config.get('PRETRAINED_EMBEDDINGS_PATH', ''))
+        if os.path.exists(pretrained_embeddings_path):
+            print(f"Loading pre-trained embeddings from: {pretrained_embeddings_path}")
+            try:
+                # Load pre-trained embeddings
+                pretrained_embeddings = torch.load(pretrained_embeddings_path)
+                
+                # Check if the embeddings match our vocabulary size and embedding dimension
+                if pretrained_embeddings.shape[0] != train_dataset.vocab.n_words:
+                    print(f"Warning: Pre-trained embeddings vocab size ({pretrained_embeddings.shape[0]}) " +
+                          f"doesn't match current vocab size ({train_dataset.vocab.n_words}). " +
+                          f"Will not use pre-trained embeddings.")
+                    pretrained_embeddings = None
+                elif pretrained_embeddings.shape[1] != config['EMBEDDING_DIM']:
+                    print(f"Warning: Pre-trained embeddings dimension ({pretrained_embeddings.shape[1]}) " +
+                          f"doesn't match specified EMBEDDING_DIM ({config['EMBEDDING_DIM']}). " +
+                          f"Will not use pre-trained embeddings.")
+                    pretrained_embeddings = None
+                else:
+                    print(f"Pre-trained embeddings loaded successfully with shape: {pretrained_embeddings.shape}")
+            except Exception as e:
+                print(f"Error loading pre-trained embeddings: {e}")
+                pretrained_embeddings = None
+        else:
+            print(f"Pre-trained embeddings file not found at: {pretrained_embeddings_path}")
+    
     # Initialize model with apply_sigmoid=False when using BCEWithLogitsLoss
     model = DiagnosisDateRelationModel(
         vocab_size=train_dataset.vocab.n_words, 
         embedding_dim=config['EMBEDDING_DIM'],
         hidden_dim=config['HIDDEN_DIM'],
-        apply_sigmoid=not use_weighted_loss  # False when using weighted loss (BCEWithLogitsLoss)
+        apply_sigmoid=not use_weighted_loss,  # False when using weighted loss (BCEWithLogitsLoss)
+        pretrained_embeddings=pretrained_embeddings
     ).to(DEVICE)
     
     optimizer = optim.Adam(model.parameters(), lr=config['LEARNING_RATE'])
@@ -140,6 +171,8 @@ def train_with_config(config, train_dataset, val_dataset, train_features, val_fe
         'ENTITY_CATEGORY_EMBEDDING_DIM': config['ENTITY_CATEGORY_EMBEDDING_DIM'],
         'USE_WEIGHTED_LOSS': config.get('USE_WEIGHTED_LOSS', False),
         'POS_WEIGHT': pos_weight if config.get('USE_WEIGHTED_LOSS', False) else None,
+        'USE_PRETRAINED_EMBEDDINGS': config.get('USE_PRETRAINED_EMBEDDINGS', False),
+        'PRETRAINED_EMBEDDINGS_PATH': config.get('PRETRAINED_EMBEDDINGS_PATH', ''),
         'train_examples': len(train_features),
         'val_examples': len(val_features),
         'positive_examples_pct': labels_info['positive_pct']
@@ -208,10 +241,41 @@ def train():
         # Handle different PyTorch versions
         try:
             # Try the newer PyTorch approach
-            vocab_instance = torch.load(vocab_full_path, weights_only=False)
+            loaded_data = torch.load(vocab_full_path, weights_only=False)
         except TypeError:
             # For older PyTorch versions that don't have weights_only
-            vocab_instance = torch.load(vocab_full_path)
+            loaded_data = torch.load(vocab_full_path)
+        
+        # Check the type of loaded data and handle accordingly
+        from custom_model_training.Vocabulary import Vocabulary
+        
+        # If it's a dictionary (like from BERT), convert to our Vocabulary format
+        if isinstance(loaded_data, dict):
+            print("Loaded a dictionary-style vocabulary, converting to Vocabulary object...")
+            vocab_instance = Vocabulary()
+            
+            # Reset the vocabulary to empty
+            vocab_instance.word2idx = {}
+            vocab_instance.idx2word = {}
+            vocab_instance.n_words = 0
+            
+            # Add special tokens first to ensure they have the expected indices
+            special_tokens = ['<pad>', '<unk>', '<cls>', '<sep>', '<mask>']
+            for token in special_tokens:
+                if token in loaded_data:
+                    vocab_instance.add_word(token)
+            
+            # Add all other tokens
+            for word, idx in loaded_data.items():
+                if word not in vocab_instance.word2idx:
+                    vocab_instance.add_word(word)
+            
+            print(f"Converted dictionary to Vocabulary object successfully.")
+        elif hasattr(loaded_data, 'n_words'):
+            # It's already a Vocabulary object
+            vocab_instance = loaded_data
+        else:
+            raise TypeError("Loaded data is neither a dictionary nor a Vocabulary object")
             
         print(f"Vocabulary loaded successfully. Size: {vocab_instance.n_words} words")
     except Exception as e:
@@ -343,15 +407,31 @@ def train():
     
     # Create datasets once using config settings from first config
     max_context_len = hyperparameter_grid[0]['MAX_CONTEXT_LEN']
+    
+    # Check if we should use a BERT tokenizer for consistency with pre-trained embeddings
+    tokenizer = None
+    if hyperparameter_grid[0].get('USE_PRETRAINED_EMBEDDINGS', False):
+        # Try to load the BERT tokenizer if specified
+        bert_model_name = hyperparameter_grid[0].get('BERT_MODEL_NAME', 'emilyalsentzer/Bio_ClinicalBERT')
+        try:
+            print(f"Loading BERT tokenizer from {bert_model_name} for consistent tokenization...")
+            tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
+            print("BERT tokenizer loaded successfully.")
+        except Exception as e:
+            print(f"Warning: Failed to load BERT tokenizer: {e}")
+            print("Falling back to simple whitespace tokenization.")
+    
     train_dataset = ClinicalNoteDataset(
         train_features, train_labels, vocab_instance, 
         max_context_len, max_distance,
-        entity_category_map
+        entity_category_map,
+        tokenizer=tokenizer
     ) 
     val_dataset = ClinicalNoteDataset(
         val_features, val_labels, vocab_instance, 
         max_context_len, max_distance,
-        entity_category_map
+        entity_category_map,
+        tokenizer=tokenizer
     )
     
     # Track the best model across all runs
@@ -411,7 +491,9 @@ def train():
             'USE_POSITION_FEATURE': best_config.get('USE_POSITION_FEATURE'),
             'ENTITY_CATEGORY_EMBEDDING_DIM': best_config.get('ENTITY_CATEGORY_EMBEDDING_DIM'),
             'USE_WEIGHTED_LOSS': best_config.get('USE_WEIGHTED_LOSS', False),
-            'POS_WEIGHT': best_config.get('POS_WEIGHT')
+            'POS_WEIGHT': best_config.get('POS_WEIGHT'),
+            'USE_PRETRAINED_EMBEDDINGS': best_config.get('USE_PRETRAINED_EMBEDDINGS', False),
+            'PRETRAINED_EMBEDDINGS_PATH': best_config.get('PRETRAINED_EMBEDDINGS_PATH', '')
         }
         
         save_dict = {
@@ -465,6 +547,8 @@ def train():
             'ENTITY_CATEGORY_EMBEDDING_DIM': best_config.get('ENTITY_CATEGORY_EMBEDDING_DIM'),
             'USE_WEIGHTED_LOSS': best_config.get('USE_WEIGHTED_LOSS', False),
             'POS_WEIGHT': best_config.get('POS_WEIGHT'),  # This will now have the auto-calculated value
+            'USE_PRETRAINED_EMBEDDINGS': best_config.get('USE_PRETRAINED_EMBEDDINGS', False),
+            'PRETRAINED_EMBEDDINGS_PATH': best_config.get('PRETRAINED_EMBEDDINGS_PATH', ''),
             'train_examples': len(train_features),
             'val_examples': len(val_features),
             'positive_examples_pct': labels_info['positive_pct']

@@ -9,6 +9,13 @@ sys.path.append(project_root)
 from extractors.base_extractor import BaseRelationExtractor
 from custom_model_training.DiagnosisDateRelationModel import DiagnosisDateRelationModel
 from utils.inference_eval_utils import preprocess_note_for_prediction, create_prediction_dataset, predict_relationships
+from custom_model_training.Vocabulary import Vocabulary
+try:
+    from transformers import AutoTokenizer
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    print("Warning: transformers package not available. Will use simple tokenization.")
 
 class CustomExtractor(BaseRelationExtractor):
     """
@@ -41,9 +48,19 @@ class CustomExtractor(BaseRelationExtractor):
         # Use the centralized category mappings from config
         self.category_mapping = config.CATEGORY_MAPPINGS
         
+        # Initialize model-related attributes
         self.model = None
         self.vocab = None 
         self.model_config = None
+        
+        # Initialize tokenizer-related attributes
+        self.tokenizer = None
+        self.use_pretrained_embeddings = getattr(config, 'USE_PRETRAINED_EMBEDDINGS', False)
+        self.bert_model_name = getattr(config, 'BERT_MODEL_NAME', 'emilyalsentzer/Bio_ClinicalBERT')
+        
+        # Special token tracking
+        self.unk_token = None
+        self.pad_token = None
         
     def load(self):
         """
@@ -62,16 +79,83 @@ class CustomExtractor(BaseRelationExtractor):
             # Handle different PyTorch versions - safe_globals was removed in newer versions
             try:
                 # Try the newer PyTorch approach
-                self.vocab = torch.load(self.vocab_path, weights_only=False)
+                loaded_data = torch.load(self.vocab_path, weights_only=False)
             except TypeError:
                 # For older PyTorch versions that don't have weights_only
-                self.vocab = torch.load(self.vocab_path)
+                loaded_data = torch.load(self.vocab_path)
             
-            if not hasattr(self.vocab, 'n_words'):
-                 print("Error: Loaded vocabulary object does not have 'n_words' attribute.")
-                 self.vocab = None
-                 return False
+            # Check the type of loaded data and handle accordingly
+            if isinstance(loaded_data, dict):
+                print("Loaded a dictionary-style vocabulary, converting to Vocabulary object...")
+                self.vocab = Vocabulary()
+                
+                # Reset the vocabulary to empty
+                self.vocab.word2idx = {}
+                self.vocab.idx2word = {}
+                self.vocab.n_words = 0
+                
+                # Add special tokens first to ensure they have the expected indices
+                special_tokens = ['<pad>', '<unk>', '<cls>', '<sep>', '<mask>', '[PAD]', '[UNK]', '[CLS]', '[SEP]', '[MASK]']
+                for token in special_tokens:
+                    if token.lower() in loaded_data:
+                        self.vocab.add_word(token.lower())
+                
+                # Add all other tokens
+                for word in loaded_data:
+                    if word not in self.vocab.word2idx:
+                        self.vocab.add_word(word)
+                
+                print(f"Converted dictionary to Vocabulary object successfully.")
+            elif hasattr(loaded_data, 'n_words'):
+                # It's already a Vocabulary object
+                self.vocab = loaded_data
+            else:
+                print("Error: Loaded vocabulary object is neither a dictionary nor a Vocabulary object.")
+                self.vocab = None
+                return False
+                
             print(f"Vocabulary loaded successfully. Size: {self.vocab.n_words} words.")
+            
+            # Determine the unknown token format used in this vocabulary
+            self.unk_token = None
+            for unk_format in ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK']:
+                if unk_format in self.vocab.word2idx:
+                    self.unk_token = unk_format
+                    break
+            
+            # If no unknown token found, use the first one as default or raise error
+            if self.unk_token is None:
+                if hasattr(self.vocab, 'word2idx') and len(self.vocab.word2idx) > 1:
+                    # Use the second token (usually the unknown token after padding)
+                    self.unk_token = list(self.vocab.word2idx.keys())[1]
+                    print(f"Warning: No standard unknown token found. Using '{self.unk_token}' as unknown token.")
+                else:
+                    print("Error: Could not find an unknown token in the vocabulary.")
+                    self.vocab = None
+                    return False
+            
+            # Determine the padding token
+            self.pad_token = None
+            for pad_format in ['<pad>', '[PAD]', '<PAD>', 'pad', 'PAD']:
+                if pad_format in self.vocab.word2idx:
+                    self.pad_token = pad_format
+                    break
+            
+            # If no padding token found, use the first one as default
+            if self.pad_token is None:
+                if hasattr(self.vocab, 'word2idx') and len(self.vocab.word2idx) > 0:
+                    self.pad_token = list(self.vocab.word2idx.keys())[0]
+                    print(f"Warning: No standard padding token found. Using '{self.pad_token}' as padding token.")
+            
+            # Load the tokenizer if using pre-trained embeddings
+            if self.use_pretrained_embeddings and TRANSFORMERS_AVAILABLE:
+                try:
+                    print(f"Loading BERT tokenizer from {self.bert_model_name} for consistent tokenization...")
+                    self.tokenizer = AutoTokenizer.from_pretrained(self.bert_model_name)
+                    print("BERT tokenizer loaded successfully.")
+                except Exception as e:
+                    print(f"Warning: Failed to load BERT tokenizer: {e}")
+                    print("Falling back to simple whitespace tokenization.")
             
             print(f"Loading custom model from: {self.model_path}")
             
@@ -204,6 +288,38 @@ class CustomExtractor(BaseRelationExtractor):
             self.vocab = None
             return False
     
+    def tokenize(self, text):
+        """
+        Tokenize text consistently with the vocabulary.
+        If a BERT tokenizer is available, use it. Otherwise, use simple whitespace tokenization.
+        
+        Args:
+            text (str): The text to tokenize
+            
+        Returns:
+            list: A list of token indices
+        """
+        if self.tokenizer:
+            # Use the BERT tokenizer
+            tokens = self.tokenizer.tokenize(text)
+            # Convert tokens to indices
+            indices = []
+            for token in tokens:
+                if token in self.vocab.word2idx:
+                    indices.append(self.vocab.word2idx[token])
+                else:
+                    indices.append(self.vocab.word2idx[self.unk_token])
+            return indices
+        else:
+            # Simple whitespace tokenization
+            indices = []
+            for word in text.split():
+                if word in self.vocab.word2idx:
+                    indices.append(self.vocab.word2idx[word])
+                else:
+                    indices.append(self.vocab.word2idx[self.unk_token])
+            return indices
+    
     def extract(self, text, entities=None, note_id=None, patient_id=None):
         """
         Extract relationships using the custom PyTorch model.
@@ -278,8 +394,11 @@ class CustomExtractor(BaseRelationExtractor):
         features = preprocess_note_for_prediction(text, diagnoses_for_model, formatted_dates, self.pred_max_distance)
         
         # Pass the confirmed lists to the next function
+        # Include the tokenizer if we're using pre-trained embeddings
+        tokenizer_for_prediction = self.tokenizer if self.use_pretrained_embeddings else None
         test_data = create_prediction_dataset(features, self.vocab, self.device, 
-                                              self.pred_max_distance, self.pred_max_context_len)
+                                              self.pred_max_distance, self.pred_max_context_len,
+                                              tokenizer=tokenizer_for_prediction)
         
         # Create a dictionary to store all predictions for each entity
         entity_predictions = {}

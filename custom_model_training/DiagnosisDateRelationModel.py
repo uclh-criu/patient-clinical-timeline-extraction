@@ -11,11 +11,20 @@ from custom_model_training.training_config_custom import ENTITY_CATEGORY_EMBEDDI
 
 # Model architecture
 class DiagnosisDateRelationModel(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, apply_sigmoid=True):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, apply_sigmoid=True, pretrained_embeddings=None):
         super(DiagnosisDateRelationModel, self).__init__()
         
         # Word embeddings
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        
+        # Initialize with pretrained embeddings if provided
+        if pretrained_embeddings is not None:
+            print(f"Initializing model with pretrained embeddings of shape {pretrained_embeddings.shape}")
+            # Make sure the shapes match
+            assert pretrained_embeddings.shape[0] == vocab_size, f"Pretrained embeddings vocab size ({pretrained_embeddings.shape[0]}) doesn't match expected vocab size ({vocab_size})"
+            assert pretrained_embeddings.shape[1] == embedding_dim, f"Pretrained embeddings dimension ({pretrained_embeddings.shape[1]}) doesn't match specified embedding_dim ({embedding_dim})"
+            self.embedding.weight.data.copy_(pretrained_embeddings)
+            print("Pretrained embeddings loaded successfully")
         
         # Entity category embeddings (for multi-entity mode)
         # Hardcoded to 4 categories: diagnosis, symptom, procedure, medication
