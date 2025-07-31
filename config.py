@@ -3,17 +3,17 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used for inference, evaluation, and timeline generation.
 # Valid options: 'imaging', 'synthetic', 'synthetic_multi', 'nph'
-DATA_SOURCE = 'imaging'
+DATA_SOURCE = 'synthetic_multi'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to use for the relation extraction task.
 # Valid options: 'diagnosis_only', 'multi_entity'
-ENTITY_MODE = "diagnosis_only"
+ENTITY_MODE = "multi_entity"
 
 # --- Execution Settings --- #
 # Controls the extraction method to use for the relation extraction task.
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'custom'
+EXTRACTION_METHOD = 'bert'
 TRAINING_SET_RATIO = 0.8 # The ratio of data to be used for the training set. The rest will be used for the test/inference set.
 DATA_SPLIT_RANDOM_SEED = 42 # A fixed random seed to ensure the train/test split is always the same.
 INFERENCE_SAMPLES = None # Limits the number of samples used from the test set. Set to None to use all test samples.
@@ -32,7 +32,7 @@ PRETRAINED_EMBEDDINGS_PATH = 'custom_model_training/vocabs/clinicalbert_embeddin
 PROXIMITY_MAX_DISTANCE = 200
 
 # --- BERT Extractor Parameters --- #
-BERT_MODEL_PATH = './bert_model_training/models'
+BERT_MODEL_PATH = './bert_model_training/bert_model'
 BERT_CONFIDENCE_THRESHOLD = 0.185  # Confidence threshold for BERT predictions
 
 # --- Llama Extractor Parameters --- #

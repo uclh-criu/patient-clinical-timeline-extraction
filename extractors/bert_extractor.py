@@ -116,9 +116,17 @@ class BertExtractor(BaseRelationExtractor):
                 entity_pos = entity.get('start', 0)
                 entity_category = entity.get('category', 'disorder')
             else:
-                # Legacy format: (label, position)
-                entity_label, entity_pos = entity
-                entity_category = 'disorder'  # Default category for legacy format
+                # Handle both tuple formats: (label, position) or (label, position, category)
+                if len(entity) == 2:
+                    # Legacy format: (label, position)
+                    entity_label, entity_pos = entity
+                    entity_category = 'disorder'  # Default category for legacy format
+                elif len(entity) == 3:
+                    # Multi-entity format: (label, position, category)
+                    entity_label, entity_pos, entity_category = entity
+                else:
+                    print(f"Warning: Unexpected entity format: {entity}. Skipping.")
+                    continue
             
             for date_tuple in dates:
                 # Unpack the date tuple: (parsed_date, raw_date_str, position)
@@ -192,8 +200,8 @@ class BertExtractor(BaseRelationExtractor):
                     confidence = probabilities.item()
                 
                 # DIAGNOSTIC PRINT: Show confidence for each pair
-                if self.debug:
-                    print(f"  - BERT Pair: ('{entity_label}', '{parsed_date}') -> Confidence: {confidence:.4f}")
+                #if self.debug:
+                    #print(f"  - BERT Pair: ('{entity_label}', '{parsed_date}') -> Confidence: {confidence:.4f}")
                 
                 # Only include relationships above the confidence threshold
                 if confidence >= self.confidence_threshold:
