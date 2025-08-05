@@ -160,7 +160,13 @@ class CustomExtractor(BaseRelationExtractor):
             print(f"Loading custom model from: {self.model_path}")
             
             # Load the saved model checkpoint
-            checkpoint = torch.load(self.model_path, map_location=self.device)
+            try:
+                # For newer PyTorch versions, we need to specify weights_only=False
+                # for models that contain pickled data like numpy scalars.
+                checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
+            except TypeError:
+                # For older PyTorch versions that don't have weights_only argument
+                checkpoint = torch.load(self.model_path, map_location=self.device)
             
             # Check if the checkpoint contains hyperparameters
             if isinstance(checkpoint, dict) and 'hyperparameters' in checkpoint:
