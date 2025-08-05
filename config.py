@@ -3,17 +3,17 @@ import torch
 # --- Data Source Settings --- #
 # Specifies the source of the data to be used for inference, evaluation, and timeline generation.
 # Valid options: 'imaging', 'synthetic', 'synthetic_multi', 'nph'
-DATA_SOURCE = 'synthetic_multi'
+DATA_SOURCE = 'synthetic'
 
 # --- Entity Mode Setting --- #
 # Controls which entity types to use for the relation extraction task.
 # Valid options: 'diagnosis_only', 'multi_entity'
-ENTITY_MODE = "multi_entity"
+ENTITY_MODE = "diagnosis_only"
 
 # --- Execution Settings --- #
 # Controls the extraction method to use for the relation extraction task.
 # Valid options: 'custom', 'naive', 'relcat', 'openai', 'llama', 'bert'
-EXTRACTION_METHOD = 'openai'
+EXTRACTION_METHOD = 'custom'
 TRAINING_SET_RATIO = 0.8 # The ratio of data to be used for the training set. The rest will be used for the test/inference set.
 DATA_SPLIT_RANDOM_SEED = 42 # A fixed random seed to ensure the train/test split is always the same.
 INFERENCE_SAMPLES = None # Limits the number of samples used from the test set. Set to None to use all test samples.
@@ -24,7 +24,7 @@ VOCAB_PATH = 'custom_model_training/vocabs/clinicalbert_vocab.pt'
 PREDICTION_MAX_DISTANCE = 500 # Max char distance used by custom_extractor when finding candidate pairs
 PREDICTION_MAX_CONTEXT_LEN = 512 # Max sequence length used by custom_extractor when creating input tensors
 CUSTOM_CONFIDENCE_THRESHOLD = 0.5 # Confidence threshold for custom model predictions
-USE_PRETRAINED_EMBEDDINGS = True # Whether to use pre-trained embeddings from a BERT model
+USE_PRETRAINED_EMBEDDINGS = False # Whether to use pre-trained embeddings from a BERT model
 BERT_MODEL_NAME = 'emilyalsentzer/Bio_ClinicalBERT' # The BERT model to use for embeddings
 PRETRAINED_EMBEDDINGS_PATH = 'custom_model_training/vocabs/clinicalbert_embeddings.pt' # Path to pre-trained embeddings
 

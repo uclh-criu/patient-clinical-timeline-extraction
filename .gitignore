@@ -25,6 +25,7 @@ synthetic_multi.csv
 nph.csv
 synthetic_results_final.csv
 model.safetensors
+models/ade_relcat_model/
 
 # Ignore all PyTorch model files
 *.pt
