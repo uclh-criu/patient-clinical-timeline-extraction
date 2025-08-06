@@ -1,32 +1,12 @@
 __pycache__/
 .env
+.cursorignore
 venv/
 Llama-3.2-3B-Instruct/
+models/ade_relcat_model/
+model.safetensors
 experiment_outputs/
 llama_test.py
-processed_notes_with_dates_and_disorders_imaging.csv
-processed_notes_with_dates_and_disorders_imaging_labelled.csv
-processed_notes_with_dates_and_disorders_notes.csv
-processed_notes_with_dates_and_disorders_letters.csv
-processed_notes_with_entities_imaging.csv
-epic_imaging_reports.csv
-epic_notes.csv
-epic_letters.csv
-synthetic.csv
-synthetic_updated.csv
-synthetic_enhanced.csv
-synthetic_multi_enhanced.csv
-synthetic_enhanced_final.csv
-synthetic_multi_enhanced_final.csv
-sample.csv
-template.csv
-imaging.csv
-synthetic_multi.csv
-nph.csv
-synthetic_results_final.csv
-model.safetensors
-models/ade_relcat_model/
-.cursorignore
 
 # Ignore all PyTorch model files
 *.pt
@@ -34,3 +14,5 @@ models/ade_relcat_model/
 *.png
 # Ignore all training log files
 *_log.csv
+# Ignore all csv files
+*.csv
