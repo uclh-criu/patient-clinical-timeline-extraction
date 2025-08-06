@@ -26,6 +26,7 @@ nph.csv
 synthetic_results_final.csv
 model.safetensors
 models/ade_relcat_model/
+.cursorignore
 
 # Ignore all PyTorch model files
 *.pt
