@@ -1,6 +1,6 @@
 # Patient Clinical Timeline Extraction
 
-This repository provides a set of tools for constructing patient clinical timelines from text in Electronic Healthcare Records (EHRs).
+This repository provides a set of tools for constructing patient clinical timelines from free text in Electronic Healthcare Records (EHRs).
 
 You can choose between six different methods for relation extraction between clinical entities and dates, which are used to construct the timelines. 
 
