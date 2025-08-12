@@ -1068,10 +1068,12 @@ def run_extraction(extractor, prepared_test_data, gold_standard=None, dataset_pa
                 if date_str and normalized_entity:
                     # Apply category mapping if available
                     mapped_category = entity_category
-                    if hasattr(extractor, 'category_mapping') and entity_category in extractor.category_mapping:
-                        mapped_category = extractor.category_mapping[entity_category]
+                    if hasattr(extractor, 'config') and hasattr(extractor.config, 'CATEGORY_MAPPINGS') and entity_category in extractor.config.CATEGORY_MAPPINGS:
+                        mapped_category = extractor.config.CATEGORY_MAPPINGS[entity_category]
                         # Track the mapping for reporting
                         if hasattr(extractor, 'seen_raw_to_normalized'):
+                            if not hasattr(extractor, 'seen_raw_to_normalized'):
+                                extractor.seen_raw_to_normalized = {}
                             extractor.seen_raw_to_normalized[entity_category] = mapped_category
                     
                     # Create prediction in the appropriate format based on the mode

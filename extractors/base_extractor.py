@@ -8,6 +8,16 @@ class BaseRelationExtractor(ABC):
     relationships between medical entities and dates in clinical notes.
     """
     
+    def __init__(self, config):
+        """
+        Initialize the base extractor with a configuration object.
+        
+        Args:
+            config: The configuration object for the run.
+        """
+        self.config = config
+        self.name = "Base Extractor"
+
     @abstractmethod
     def extract(self, text, entities=None):
         """

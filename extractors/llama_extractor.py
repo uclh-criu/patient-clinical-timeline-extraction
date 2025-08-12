@@ -17,7 +17,7 @@ class LlamaExtractor(BaseRelationExtractor):
         Args:
             config: Configuration object or dict with necessary parameters.
         """
-        self.config = config
+        super().__init__(config)  # Call the parent constructor
         self.model_id = config.LLAMA_MODEL_PATH if hasattr(config, 'LLAMA_MODEL_PATH') else './Llama-3.2-3B-Instruct'
         self.name = "Llama-3.2"
         self.pipeline = None
@@ -116,12 +116,23 @@ class LlamaExtractor(BaseRelationExtractor):
                     "position": entity.get('start', 0)
                 })
             else:
-                # Legacy format: tuple of (label, position)
-                entities_info.append({
-                    "entity_label": entity[0],
-                    "entity_category": "disorder",  # Default category
-                    "position": entity[1]
-                })
+                # Handle tuple formats: (label, position) or (label, position, category)
+                if len(entity) == 3:
+                    # Multi-entity format: (label, position, category)
+                    label, position, category = entity
+                    entities_info.append({
+                        "entity_label": label,
+                        "entity_category": category,
+                        "position": position
+                    })
+                elif len(entity) == 2:
+                    # Legacy format: (label, position)
+                    label, position = entity
+                    entities_info.append({
+                        "entity_label": label,
+                        "entity_category": "disorder",  # Default category
+                        "position": position
+                    })
         
         # Extract parsed date, raw date string, and position
         dates_info = [{"parsed_date": d[0], "raw_date": d[1], "position": d[2]} for d in dates]

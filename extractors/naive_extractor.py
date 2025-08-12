@@ -17,6 +17,7 @@ class NaiveExtractor(BaseRelationExtractor):
         Args:
             config: The configuration object or dict containing PROXIMITY_MAX_DISTANCE parameter.
         """
+        super().__init__(config)  # Call the parent constructor
         self.max_distance = config.PROXIMITY_MAX_DISTANCE if hasattr(config, 'PROXIMITY_MAX_DISTANCE') else 200
         self.name = "Naive (Proximity)"
     

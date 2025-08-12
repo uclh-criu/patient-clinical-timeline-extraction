@@ -7,6 +7,7 @@ models/ade_relcat_model/
 model.safetensors
 experiment_outputs/
 llama_test.py
+temp.py
 
 # Ignore all PyTorch model files
 *.pt

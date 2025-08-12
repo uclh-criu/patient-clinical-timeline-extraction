@@ -16,6 +16,7 @@ class BertExtractor(BaseRelationExtractor):
         Args:
             config: The configuration object or dict containing BERT_MODEL_PATH and other parameters.
         """
+        super().__init__(config)  # Call the parent constructor
         self.model_path = config.BERT_MODEL_PATH
         self.name = "BERT"
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
