@@ -10,6 +10,7 @@ experiment_outputs/
 llama_test.py
 temp.py
 gpt_oss_test.py
+bert_model_training/base_model/
 
 # Ignore all PyTorch model files
 *.pt
