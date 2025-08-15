@@ -107,7 +107,7 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
     
     # Train the model
     print(f"Starting training for {hyperparams['BERT_NUM_TRAIN_EPOCHS']} epochs...")
-    metrics = train_bert_model(
+    best_model_state, metrics = train_bert_model(
         model,
         tokenizer,
         train_loader,
@@ -157,7 +157,7 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
             'bert_model_training_log.csv'
         )
     
-    return metrics['best_val_f1'], model_save_path, metrics
+    return metrics['best_val_f1'], best_model_state, metrics, model_save_path
 
 def main():
     """
@@ -213,22 +213,26 @@ def main():
     
     # Track the best model across all runs
     best_val_f1 = 0
+    best_model_state = None
     best_model_path = None
     best_config = None
     best_metrics = None
+    best_tokenizer = None
     
     # Train with each hyperparameter combination
     start_time = time.time()
     for i, config in enumerate(hyperparameter_grid):
         print(f"\nTraining run {i+1}/{len(hyperparameter_grid)}")
-        val_f1, model_path, metrics = train_with_config(config, train_dataset, val_dataset, tokenizer)
+        val_f1, model_state, metrics, model_path = train_with_config(config, train_dataset, val_dataset, tokenizer)
         
         # Update best model if this run is better
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
+            best_model_state = model_state
             best_model_path = model_path
             best_config = config
             best_metrics = metrics
+            best_tokenizer = tokenizer  # Store the tokenizer for saving later
             print(f"\n*** New best model found with validation F1-score: {best_val_f1:.4f} ***")
     
     # Print summary of grid search
@@ -243,6 +247,29 @@ def main():
         if isinstance(getattr(training_config, key, None), list):
             print(f"  {key}: {value}")
     print(f"{'='*80}")
+    
+    # Save the best model once at the end of grid search
+    if best_model_state is not None and best_tokenizer is not None and best_model_path:
+        print(f"\nSaving best model to: {best_model_path}")
+        
+        # Create directory if it doesn't exist
+        os.makedirs(best_model_path, exist_ok=True)
+        
+        # Recreate the model with the same architecture
+        model = AutoModelForSequenceClassification.from_pretrained(
+            best_config['BERT_PRETRAINED_MODEL'],
+            num_labels=1,
+            hidden_dropout_prob=best_config['BERT_DROPOUT']
+        )
+        
+        # Load the best state dict
+        model.load_state_dict(best_model_state)
+        
+        # Save the model and tokenizer using Hugging Face format
+        model.save_pretrained(best_model_path)
+        best_tokenizer.save_pretrained(best_model_path)
+        
+        print(f"✓ Best model and tokenizer saved successfully!")
     
     # Log only the best model at the end of grid search
     if best_model_path and best_metrics and best_config:

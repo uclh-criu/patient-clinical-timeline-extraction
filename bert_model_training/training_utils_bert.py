@@ -247,6 +247,7 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
     val_accs = []
     val_f1s = []
     best_val_f1 = 0
+    best_model_state = None
     
     # Training loop
     for epoch in range(num_epochs):
@@ -391,21 +392,15 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
         print(f"Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.2f}%")
         print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
         
-        # Save the best model
+        # Track the best model state
         if f1 > best_val_f1:
             best_val_f1 = f1
             print(f"New best model with validation F1-score: {f1:.4f}")
             print(f"  Validation Accuracy: {val_acc:.2f}%")
             print(f"  Precision: {precision:.4f}, Recall: {recall:.4f}")
-            print(f"Saving model to: {model_save_path}")
             
-            # Create directory if it doesn't exist
-            import os
-            os.makedirs(model_save_path, exist_ok=True)
-            
-            # Save the model and tokenizer using Hugging Face format
-            model.save_pretrained(model_save_path)
-            tokenizer.save_pretrained(model_save_path)
+            # Store the model state dict (not saving to disk yet)
+            best_model_state = model.state_dict().copy()
     
     # Return metrics
     metrics = {
@@ -426,6 +421,6 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
         'val_f1': val_f1s[-1] if val_f1s else 0  # For consistency with log_training_run
     }
     
-    return metrics
+    return best_model_state, metrics
 
 # plot_bert_training_curves has been consolidated with plot_training_curves
