@@ -157,7 +157,7 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
             'bert_model_training_log.csv'
         )
     
-    return metrics['best_val_acc'], model_save_path, metrics
+    return metrics['best_val_f1'], model_save_path, metrics
 
 def main():
     """
@@ -212,7 +212,7 @@ def main():
         return
     
     # Track the best model across all runs
-    best_val_acc = 0
+    best_val_f1 = 0
     best_model_path = None
     best_config = None
     best_metrics = None
@@ -221,21 +221,22 @@ def main():
     start_time = time.time()
     for i, config in enumerate(hyperparameter_grid):
         print(f"\nTraining run {i+1}/{len(hyperparameter_grid)}")
-        val_acc, model_path, metrics = train_with_config(config, train_dataset, val_dataset, tokenizer)
+        val_f1, model_path, metrics = train_with_config(config, train_dataset, val_dataset, tokenizer)
         
         # Update best model if this run is better
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
             best_model_path = model_path
             best_config = config
             best_metrics = metrics
-            print(f"\n*** New best model found with validation accuracy: {best_val_acc:.2f}% ***")
+            print(f"\n*** New best model found with validation F1-score: {best_val_f1:.4f} ***")
     
     # Print summary of grid search
     elapsed_time = time.time() - start_time
     print(f"\n{'='*80}")
     print(f"Grid search completed in {elapsed_time:.2f} seconds.")
-    print(f"Best validation accuracy: {best_val_acc:.2f}%")
+    print(f"Best validation F1-score: {best_val_f1:.4f}")
+    print(f"Best validation accuracy: {best_metrics['best_val_acc']:.2f}%")
     print(f"Best model saved to: {best_model_path}")
     print(f"Best hyperparameters:")
     for key, value in best_config.items():
