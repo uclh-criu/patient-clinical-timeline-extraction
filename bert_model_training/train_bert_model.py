@@ -3,7 +3,8 @@ import sys
 import time
 import torch
 from torch.utils.data import DataLoader
-from transformers import AutoModelForSequenceClassification, AdamW
+from torch.optim import AdamW
+from transformers import AutoModelForSequenceClassification
 from transformers import get_linear_schedule_with_warmup
 
 # Adjust relative paths for imports
@@ -47,13 +48,14 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
     dataset_path = hyperparams['BERT_TRAINING_DATA_PATH']
     dataset_name = os.path.basename(dataset_path)
     
-    # Create model name based on dataset name only
-    model_name = f"{os.path.splitext(dataset_name)[0]}_bert.pt"
+    # Create a directory name for the model based on the dataset
+    model_dir_name = f"{os.path.splitext(dataset_name)[0]}_bert_model"
     
-    # Ensure model directory exists
-    model_dir = os.path.join(project_root, 'bert_model_training/models')
-    os.makedirs(model_dir, exist_ok=True)
-    model_path = os.path.join(model_dir, model_name)
+    # Define the parent directory for all BERT models
+    models_parent_dir = os.path.join(project_root, 'bert_model_training/models')
+    
+    # Create the full path for the new model's directory
+    model_save_path = os.path.join(models_parent_dir, model_dir_name)
     
     # Create data loaders
     train_loader = DataLoader(
@@ -114,13 +116,13 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
         scheduler,
         hyperparams['BERT_NUM_TRAIN_EPOCHS'],
         device,
-        model_path
+        model_save_path
     )
     
     # Plot training curves
-    # Extract dataset name from model name
-    dataset_name = os.path.splitext(model_name)[0].replace('_bert', '')
-    curves_path = os.path.join(project_root, 'bert_model_training/plots', f"{dataset_name}_bert")
+    # Extract dataset name from the directory name
+    dataset_name_for_plots = os.path.splitext(dataset_name)[0]
+    curves_path = os.path.join(project_root, 'bert_model_training/plots', f"{dataset_name_for_plots}_bert")
     plot_training_curves(metrics, curves_path)
     
     # Log the training run
@@ -155,7 +157,7 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
             'bert_model_training_log.csv'
         )
     
-    return metrics['best_val_acc'], model_path, metrics
+    return metrics['best_val_acc'], model_save_path, metrics
 
 def main():
     """

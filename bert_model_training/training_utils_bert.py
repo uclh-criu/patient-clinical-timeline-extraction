@@ -217,7 +217,7 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
     
     return train_dataset, val_dataset, tokenizer
 
-def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, scheduler, num_epochs, device, model_path):
+def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, scheduler, num_epochs, device, model_save_path):
     """
     Train the BERT model.
     
@@ -230,7 +230,7 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
         scheduler: Learning rate scheduler
         num_epochs: Number of epochs to train for
         device: Device to train on (cpu or cuda)
-        model_path: Path to save the best model
+        model_save_path: Directory path to save the best model (Hugging Face format)
         
     Returns:
         dict: Dictionary containing training metrics
@@ -393,13 +393,15 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             print(f"New best model with validation accuracy: {val_acc:.2f}%")
+            print(f"Saving model to: {model_save_path}")
             
             # Create directory if it doesn't exist
             import os
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            os.makedirs(model_save_path, exist_ok=True)
             
-            # Save the model
-            torch.save(model.state_dict(), model_path)
+            # Save the model and tokenizer using Hugging Face format
+            model.save_pretrained(model_save_path)
+            tokenizer.save_pretrained(model_save_path)
     
     # Return metrics
     metrics = {
