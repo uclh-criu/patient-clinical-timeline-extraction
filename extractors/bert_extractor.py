@@ -30,7 +30,7 @@ class BertExtractor(BaseRelationExtractor):
             self.confidence_threshold = getattr(config, 'BERT_CONFIDENCE_THRESHOLD', 0.185)  # Get from main config
         except (ImportError, AttributeError) as e:
             print(f"Warning: Could not load training_config_bert. Using default values. Error: {e}")
-            self.pretrained_model_name = 'dmis-lab/biobert-base-cased-v1.1'
+            self.pretrained_model_name = './bert_model_training/base_model'
             self.max_seq_length = 512
             self.confidence_threshold = 0.185  # Lower threshold
         
@@ -54,16 +54,17 @@ class BertExtractor(BaseRelationExtractor):
                 self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
                 self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
             else:
-                # If model doesn't exist, load the pre-trained model
-                print(f"Fine-tuned model not found at {self.model_path}. Loading pre-trained model {self.pretrained_model_name}")
-                self.model = AutoModelForSequenceClassification.from_pretrained(self.pretrained_model_name, num_labels=1)
-                self.tokenizer = AutoTokenizer.from_pretrained(self.pretrained_model_name)
-                
-                # Add special tokens for entity marking if they don't exist
-                special_tokens = {'additional_special_tokens': ['[E1]', '[/E1]', '[E2]', '[/E2]']}
-                self.tokenizer.add_special_tokens(special_tokens)
-                self.model.resize_token_embeddings(len(self.tokenizer))
+                print(f"Error: Fine-tuned model not found at {self.model_path}")
+                print("For isolated environments, you must train a model first or ensure a fine-tuned model exists locally.")
+                print("Cannot download base model from Hugging Face Hub in isolated environment.")
+                print("Run 'python setup_base_model.py' when internet is available to download the base model.")
+                return False
             
+            # Add special tokens for entity marking if they don't exist
+            special_tokens = {'additional_special_tokens': ['[E1]', '[/E1]', '[E2]', '[/E2]']}
+            self.tokenizer.add_special_tokens(special_tokens)
+            self.model.resize_token_embeddings(len(self.tokenizer))
+
             # Move model to the appropriate device
             self.model.to(self.device)
             self.model.eval()  # Set to evaluation mode
