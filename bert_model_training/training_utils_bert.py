@@ -126,10 +126,19 @@ def prepare_bert_training_data(csv_path, pretrained_model_name, max_seq_length, 
                 entity_end = entity.get('end', entity_start + len(entity_label))
                 entity_category = entity.get('category', 'diagnosis').lower()
             else:
-                # Legacy format: (label, position)
-                entity_label, entity_start = entity
-                entity_end = entity_start + len(entity_label)
-                entity_category = 'diagnosis'  # Default category for legacy format
+                # Handle both tuple formats: (label, position) or (label, position, category)
+                if len(entity) == 2:
+                    # Legacy format: (label, position)
+                    entity_label, entity_start = entity
+                    entity_end = entity_start + len(entity_label)
+                    entity_category = 'diagnosis'  # Default category for legacy format
+                elif len(entity) == 3:
+                    # Multi-entity format: (label, position, category)
+                    entity_label, entity_start, entity_category = entity
+                    entity_end = entity_start + len(entity_label)
+                else:
+                    print(f"Warning: Unexpected entity format in prepare_bert_training_data: {entity}. Skipping.")
+                    continue
             
             for date_tuple in dates:
                 # Unpack the date tuple: (parsed_date, raw_date_str, position)
