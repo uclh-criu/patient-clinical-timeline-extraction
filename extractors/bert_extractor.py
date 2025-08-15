@@ -50,9 +50,15 @@ class BertExtractor(BaseRelationExtractor):
                 print("A fine-tuned model is required for inference. Please ensure the model exists at the specified path.")
                 return False
             
-            # Set max_seq_length from the loaded tokenizer
-            self.max_seq_length = self.tokenizer.model_max_length
-            
+            # Set max_seq_length from the loaded model's config or use reasonable default
+            # tokenizer.model_max_length can be extremely large, so check model config first
+            if hasattr(self.model.config, 'max_position_embeddings'):
+                self.max_seq_length = self.model.config.max_position_embeddings
+            elif self.tokenizer.model_max_length < 100000:  # Reasonable upper bound
+                self.max_seq_length = self.tokenizer.model_max_length
+            else:
+                self.max_seq_length = 512  # Safe default
+    
             # Add special tokens for entity marking if they don't exist
             special_tokens = {'additional_special_tokens': ['[E1]', '[/E1]', '[E2]', '[/E2]']}
             self.tokenizer.add_special_tokens(special_tokens)
