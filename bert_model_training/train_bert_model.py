@@ -119,12 +119,6 @@ def train_with_config(hyperparams, train_dataset, val_dataset, tokenizer):
         model_save_path
     )
     
-    # Plot training curves
-    # Extract dataset name from the directory name
-    dataset_name_for_plots = os.path.splitext(dataset_name)[0]
-    curves_path = os.path.join(project_root, 'bert_model_training/plots', f"{dataset_name_for_plots}_bert")
-    plot_training_curves(metrics, curves_path)
-    
     # Log the training run
     hyperparams_for_logging = {
         'ENTITY_MODE': entity_mode,
@@ -270,6 +264,12 @@ def main():
         best_tokenizer.save_pretrained(best_model_path)
         
         print(f"✓ Best model and tokenizer saved successfully!")
+        
+        # Plot training curves for the best model and save in the same directory
+        print(f"Saving training curves for best model...")
+        curves_path = os.path.join(best_model_path, "training_curves")
+        plot_training_curves(best_metrics, curves_path)
+        print(f"✓ Training curves saved to: {curves_path}.png")
     
     # Log only the best model at the end of grid search
     if best_model_path and best_metrics and best_config:
