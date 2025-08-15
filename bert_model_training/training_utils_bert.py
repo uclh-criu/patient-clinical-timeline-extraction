@@ -245,7 +245,8 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
     train_losses = []
     val_losses = []
     val_accs = []
-    best_val_acc = 0
+    val_f1s = []
+    best_val_f1 = 0
     
     # Training loop
     for epoch in range(num_epochs):
@@ -382,6 +383,7 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
         precision, recall, f1, _ = precision_recall_fscore_support(
             all_labels, all_preds, average='binary', zero_division=0
         )
+        val_f1s.append(f1)
         
         # Print metrics
         print(f"Epoch {epoch+1}/{num_epochs}")
@@ -390,9 +392,11 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
         print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
         
         # Save the best model
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            print(f"New best model with validation accuracy: {val_acc:.2f}%")
+        if f1 > best_val_f1:
+            best_val_f1 = f1
+            print(f"New best model with validation F1-score: {f1:.4f}")
+            print(f"  Validation Accuracy: {val_acc:.2f}%")
+            print(f"  Precision: {precision:.4f}, Recall: {recall:.4f}")
             print(f"Saving model to: {model_save_path}")
             
             # Create directory if it doesn't exist
@@ -408,14 +412,18 @@ def train_bert_model(model, tokenizer, train_loader, val_loader, optimizer, sche
         'train_losses': train_losses,
         'val_losses': val_losses,
         'val_accs': val_accs,
-        'best_val_acc': best_val_acc,
+        'val_f1s': val_f1s,
+        'best_val_f1': best_val_f1,
+        'best_val_acc': val_accs[val_f1s.index(best_val_f1)] if val_f1s else 0,
         'final_train_loss': train_losses[-1],
         'final_val_loss': val_losses[-1],
         'final_val_acc': val_accs[-1],
+        'final_val_f1': val_f1s[-1] if val_f1s else 0,
         'epochs': num_epochs,
         'train_loss': train_losses[-1],  # For consistency with log_training_run
         'val_loss': val_losses[-1],      # For consistency with log_training_run
-        'val_acc': val_accs[-1]          # For consistency with log_training_run
+        'val_acc': val_accs[-1],         # For consistency with log_training_run
+        'val_f1': val_f1s[-1] if val_f1s else 0  # For consistency with log_training_run
     }
     
     return metrics

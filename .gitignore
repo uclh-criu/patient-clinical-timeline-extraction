@@ -6,11 +6,12 @@ Llama-3.2-3B-Instruct/
 gpt-oss-20b/
 models/ade_relcat_model/
 model.safetensors
+bert_model_training/models/
+bert_model_training/base_model/
 experiment_outputs/
 llama_test.py
 temp.py
 gpt_oss_test.py
-bert_model_training/base_model/
 
 # Ignore all PyTorch model files
 *.pt
