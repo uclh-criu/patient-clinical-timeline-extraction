@@ -22,17 +22,9 @@ class BertExtractor(BaseRelationExtractor):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.debug = getattr(config, 'MODEL_DEBUG_MODE', False)
         
-        # Get BERT parameters from training config
-        try:
-            from bert_model_training import training_config_bert
-            self.pretrained_model_name = training_config_bert.BERT_PRETRAINED_MODEL
-            self.max_seq_length = training_config_bert.BERT_MAX_SEQ_LENGTH
-            self.confidence_threshold = getattr(config, 'BERT_CONFIDENCE_THRESHOLD', 0.185)  # Get from main config
-        except (ImportError, AttributeError) as e:
-            print(f"Warning: Could not load training_config_bert. Using default values. Error: {e}")
-            self.pretrained_model_name = './bert_model_training/base_model'
-            self.max_seq_length = 512
-            self.confidence_threshold = 0.185  # Lower threshold
+        # Get BERT parameters from main config
+        self.max_seq_length = None  # Will be set from loaded tokenizer
+        self.confidence_threshold = getattr(config, 'BERT_CONFIDENCE_THRESHOLD', 0.185)
         
         # Initialize model and tokenizer as None (will be loaded in load())
         self.model = None
@@ -55,10 +47,11 @@ class BertExtractor(BaseRelationExtractor):
                 self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
             else:
                 print(f"Error: Fine-tuned model not found at {self.model_path}")
-                print("For isolated environments, you must train a model first or ensure a fine-tuned model exists locally.")
-                print("Cannot download base model from Hugging Face Hub in isolated environment.")
-                print("Run 'python setup_base_model.py' when internet is available to download the base model.")
+                print("A fine-tuned model is required for inference. Please ensure the model exists at the specified path.")
                 return False
+            
+            # Set max_seq_length from the loaded tokenizer
+            self.max_seq_length = self.tokenizer.model_max_length
             
             # Add special tokens for entity marking if they don't exist
             special_tokens = {'additional_special_tokens': ['[E1]', '[/E1]', '[E2]', '[/E2]']}

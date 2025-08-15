@@ -12,7 +12,7 @@ ENTITY_MODE = 'diagnosis_only'  # Entity mode: 'diagnosis_only' or 'multi_entity
 
 # BERT Training Data
 BERT_TRAINING_DATA_PATH = 'data/synthetic.csv'  # Data to train BERT model on
-BERT_PRETRAINED_MODEL = './bert_model_training/base_model'  # Path to locally stored base model = 'dmis-lab/biobert-base-cased-v1.1'
+BERT_PRETRAINED_MODEL = './bert_model_training/base_model'  # Path to locally stored base model
 BERT_MAX_SEQ_LENGTH = 512  # Maximum sequence length for BERT
 BERT_BATCH_SIZE = 8  # Batch size for BERT training
 BERT_LEARNING_RATE = 2e-5  # Learning rate for BERT fine-tuning
