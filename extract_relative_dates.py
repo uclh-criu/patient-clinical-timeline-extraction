@@ -78,12 +78,6 @@ def extract_relative_dates():
     notes_processed = 0
     dates_extracted = 0
     
-    # Create a backup of the original CSV
-    backup_path = dataset_path + '.backup'
-    if not os.path.exists(backup_path):
-        df.to_csv(backup_path, index=False)
-        print(f"Created backup of original CSV at {backup_path}")
-    
     # Process each note
     with tqdm(total=len(df), desc="Extracting relative dates", unit="note") as pbar:
         for i, row in df.iterrows():
