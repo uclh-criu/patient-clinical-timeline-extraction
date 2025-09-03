@@ -1,6 +1,7 @@
 __pycache__/
 Llama-3.2-3B-Instruct/
 /venv
+bert_model_training/
 
 # Ignore all csv files
 *.csv

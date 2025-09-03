@@ -25,6 +25,7 @@ def prepare_all_samples(df):
             'note_text': note_text,
             'entities_list': entities_list,
             'dates': dates,
+            'relationship_gold': row['relationship_gold'],  # Add this line!
             'patient_id': row['patient'],
             'note_id': row['note_id']
         })
