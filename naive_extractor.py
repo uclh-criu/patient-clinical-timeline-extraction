@@ -1,5 +1,10 @@
-def naive_extraction(note_text, entities_list, dates, max_distance=200):
-    """Simple proximity-based relationship extraction"""
+def naive_extraction(entities_list, dates, max_distance=200):
+    """
+    Simple proximity-based relationship extraction. Finds nearest date for each entity within max_distance.
+    Note: only ever assigns an entity one date (no more or less) as long as there is one within max distance.
+    Args: entity and date dicts with character positions.
+    Returns: list of relationship dicts showing linked entities and dates, as well as confidence score (always 1) and distance.  
+    """
     relationships = []
     
     for entity in entities_list:
