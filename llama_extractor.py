@@ -1,19 +1,30 @@
 import json
 import re
+import os
 
-def make_binary_prompt(entity, date, note_text, max_note_len=300):
+def load_prompt_template(prompt_path):
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def make_binary_prompt(entity, date, note_text, prompt_filename, max_note_len=300):
     """
     Create a prompt for binary classification of entity-date relationship.
+    Args:
+        entity (dict): Entity info.
+        date (dict): Date info.
+        note_text (str): The clinical note.
+        prompt_filename (str): Filename of the prompt template (e.g., "prompt1.txt").
+        max_note_len (int): Max length of note text to include.
+    Returns:
+        str: The full prompt for the model.
     """
+    # Always resolve path relative to this file, into the prompts/ folder
+    prompt_dir = os.path.join(os.path.dirname(__file__), "prompts")
+    prompt_path = os.path.join(prompt_dir, prompt_filename)
+    prompt_template = load_prompt_template(prompt_path)
+
     prompt = (
-        "You are a clinical NLP assistant. For the following clinical note, "
-        "determine if the entity and date are directly linked (i.e., the entity was diagnosed, treated, or mentioned as occurring on that date). "
-        "Respond with only one word: Yes, No, or Unsure.\n\n"
-        "Examples:\n"
-        "Entity: asthma\nDate: 2024-08-02\nNote: Patient diagnosed with asthma on 2024-08-02.\nAnswer: Yes\n\n"
-        "Entity: diabetes\nDate: 2024-08-02\nNote: Patient diagnosed with asthma on 2024-08-02. Patient also has diabetes.\nAnswer: No\n\n"
-        "Entity: hypertension\nDate: 2024-08-02\nNote: Patient has hypertension, last reviewed in 2022.\nAnswer: No\n\n"
-        "Entity: pneumonia\nDate: 2024-08-02\nNote: Patient may have pneumonia, last seen on 2024-08-02.\nAnswer: Unsure\n\n"
+        prompt_template +
         f"Entity: {entity['label']}\n"
         f"Date: {date['parsed']}\n"
         f"Note: {note_text[:max_note_len]}\n"
