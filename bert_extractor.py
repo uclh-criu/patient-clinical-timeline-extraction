@@ -41,25 +41,27 @@ def mark_date(text, date, marker="[D]"):
     start, end = date['start'], date['end']
     return text[:start] + marker + text[start:end] + marker + text[end:]
 
-def preprocess_input(note_text, entity, date, window_size=100):
+def preprocess_input(note_text, entity, date, window_size=100, entity_marker='[E]', date_marker='[D]'):
     """
     Prepare the input text for BERT by extracting a context window and marking entity/date.
-    Args:
-        note_text (str): The full clinical note.
-        entity (dict): Entity with 'start' and 'end'.
-        date (dict): Date with 'start' and 'end'.
-        window_size (int): Context window size.
-    Returns:
-        str: Preprocessed input text for BERT.
     """
     context = get_context_window(note_text, entity['start'], date['start'], window_size)
-    # Adjust entity/date positions relative to context window
-    offset = context.find(note_text[entity['start']:entity['end']])
-    entity_rel = {'start': offset, 'end': offset + (entity['end'] - entity['start'])}
-    offset_date = context.find(note_text[date['start']:date['end']])
-    date_rel = {'start': offset_date, 'end': offset_date + (date['end'] - date['start'])}
-    marked = mark_entity(context, entity_rel)
-    marked = mark_date(marked, date_rel)
+    # Find entity and date positions in context
+    entity_text = note_text[entity['start']:entity['end']]
+    date_text = note_text[date['start']:date['end']]
+    entity_offset = context.find(entity_text)
+    date_offset = context.find(date_text)
+    entity_span = (entity_offset, entity_offset + len(entity_text))
+    date_span = (date_offset, date_offset + len(date_text))
+
+    # Insert markers in reverse order (rightmost first)
+    spans = sorted([('entity', *entity_span), ('date', *date_span)], key=lambda x: x[1], reverse=True)
+    marked = context
+    for label, start, end in spans:
+        if label == 'entity':
+            marked = marked[:start] + entity_marker + marked[start:end] + entity_marker + marked[end:]
+        else:
+            marked = marked[:start] + date_marker + marked[start:end] + date_marker + marked[end:]
     return marked
 
 def bert_extraction(note_text, entity, date, model, tokenizer, window_size=100):
