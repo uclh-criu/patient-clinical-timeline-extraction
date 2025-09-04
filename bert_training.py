@@ -3,6 +3,9 @@ from sklearn.model_selection import train_test_split
 from utils import get_entity_date_pairs
 from bert_extractor import preprocess_input
 
+def tokenize_function(example, tokenizer):
+    return tokenizer(example["text"], truncation=True, padding="max_length", max_length=128)
+
 def add_special_tokens(tokenizer, entity_marker='[E]', date_marker='[D]'):
     """
     Adds special tokens for entity and date marking to the tokenizer.
@@ -27,14 +30,6 @@ def make_training_pairs(samples, gold_lookup, window_size=100, entity_marker='[E
             label = 1 if gold_lookup(sample, pair) else 0
             rows.append({'text': text, 'label': label})
     return pd.DataFrame(rows)
-
-def split_train_val(df, val_frac=0.2, random_state=42):
-    """
-    Splits a DataFrame into train and validation sets, stratified by label.
-    Returns: train_df, val_df
-    """
-    train_df, val_df = train_test_split(df, test_size=val_frac, random_state=random_state, stratify=df['label'])
-    return train_df.reset_index(drop=True), val_df.reset_index(drop=True)
 
 def balance_classes(df, ratio=1.0, random_state=42):
     """
