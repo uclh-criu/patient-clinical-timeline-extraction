@@ -24,7 +24,7 @@ def make_binary_prompt(entity, date, note_text, prompt_filename, max_note_len=30
     prompt_template = load_prompt_template(prompt_path)
 
     prompt = (
-        prompt_template +
+        prompt_template + "\n"
         f"Entity: {entity['label']}\n"
         f"Date: {date['parsed']}\n"
         f"Note: {note_text[:max_note_len]}\n"
@@ -32,14 +32,14 @@ def make_binary_prompt(entity, date, note_text, prompt_filename, max_note_len=30
     )
     return prompt
 
-def llama_extraction(prompt, generator, max_new_tokens=5):
+def llm_extraction(prompt, generator, max_new_tokens=5):
     """
-    Call the Llama model with a binary prompt and return the full response.
+    Call the LLM with a binary prompt and return the full response.
     """
     outputs = generator(prompt, max_new_tokens=max_new_tokens, do_sample=False)
     return outputs[0]['generated_text']
 
-def parse_llama_answer(full_response):
+def parse_llm_answer(full_response):
     """
     Extract the answer (Yes/No/Unsure) from the model's response.
     """
