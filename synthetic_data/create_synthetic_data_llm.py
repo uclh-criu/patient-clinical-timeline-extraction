@@ -35,9 +35,16 @@ from typing import List, Dict, Any, Tuple
 
 import pandas as pd
 from dotenv import load_dotenv
+import numpy as np
 
-# EDA functions (already implemented in your repo)
-from synthetic_data.eda_analysis import (
+# EDA functions (local module in synthetic_data/)
+import sys
+from pathlib import Path
+_THIS_DIR = Path(__file__).resolve().parent
+if str(_THIS_DIR) not in sys.path:
+    sys.path.append(str(_THIS_DIR))
+
+from eda_analysis import (
     get_doc_length_stats,
     get_entity_count_stats,
     get_entity_frequency,
@@ -45,11 +52,32 @@ from synthetic_data.eda_analysis import (
 )
 
 # Optional curated constants to improve variety/quality
-from synthetic_data.constants import FILLER_TEXT, TOP_DIAGNOSIS_ENTITIES
+from constants import FILLER_TEXT, TOP_DIAGNOSIS_ENTITIES
 
 # You can use the new OpenAI SDK (if installed). Otherwise, swap to your LLM client of choice.
 # pip install openai>=1.0.0
 from openai import OpenAI
+
+
+def make_json_safe(obj):
+    """
+    Recursively convert numpy/pandas types to native Python types so json.dumps works.
+    """
+    if isinstance(obj, dict):
+        return {make_json_safe(k): make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [make_json_safe(x) for x in obj]
+    if isinstance(obj, (np.integer, )):
+        return int(obj)
+    if isinstance(obj, (np.floating, )):
+        return float(obj)
+    if hasattr(obj, "item"):
+        # catches some pandas/numpy scalars
+        try:
+            return obj.item()
+        except Exception:
+            return obj
+    return obj
 
 
 def load_eda_stats(
@@ -78,66 +106,59 @@ def load_eda_stats(
         for e in backfill_entities:
             eda["entity_frequency"].setdefault(e, 1)
 
-    return eda
+    return make_json_safe(eda)
+
+
+def load_prompt_templates(path: str) -> Tuple[str, str]:
+    """
+    Load system and user prompt templates from a single prompt.txt file.
+    The file must contain the two sections exactly as in prompt.txt:
+      'SYSTEM PROMPT (paste into system_prompt):' ... then
+      'USER PROMPT (paste into user_prompt):' ...
+    Returns:
+        (system_template, user_template)
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+    # Split on markers
+    sys_marker = "SYSTEM PROMPT (paste into system_prompt):"
+    usr_marker = "USER PROMPT (paste into user_prompt):"
+    if sys_marker not in text or usr_marker not in text:
+        raise ValueError("prompt.txt must include both system and user sections with the exact markers.")
+    _, after_sys = text.split(sys_marker, 1)
+    system_template, user_template = after_sys.split(usr_marker, 1)
+    return system_template.strip(), user_template.strip()
 
 
 def build_llm_prompt(
     eda_stats: Dict[str, Any],
     examples: List[str],
     reference_date: str,
-    note_style_hint: str = "Outpatient clinic note with History/Exam/Plan sections"
+    note_style_hint: str = "Outpatient clinic note with History/Exam/Plan sections",
+    prompt_path: str = "synthetic_data/prompt.txt"
 ) -> Tuple[str, str]:
     """
-    Construct system and user messages for the LLM.
-    - Includes EDA JSON and examples (names redacted).
-    - Describes the markup to use for entities/dates and how to list relationships.
+    Build prompts using prompt.txt templates. Replaces placeholders:
+    - {reference_date}, {note_style_hint}, {EDA_JSON}
+    - Always appends any provided examples after the template's examples section.
     """
-    # Compact EDA JSON for prompt
-    eda_json = json.dumps(eda_stats, indent=2)
+    system_template, user_template = load_prompt_templates(prompt_path)
+    eda_json = json.dumps(make_json_safe(eda_stats), indent=2)
 
-    system_prompt = f"""You are a clinical documentation generator. Your goal is to produce realistic,
-coherent clinical notes that match statistical properties (length, entity/date counts, variety) extracted
-from a real dataset. You must strictly follow markup instructions so the generated note can be
-programmatically parsed for entities, dates, and gold relationships.
+    # Render system prompt
+    system_prompt = system_template.format(
+        reference_date=reference_date,
+        note_style_hint=note_style_hint
+    )
 
-Reference date for resolving relative dates: {reference_date}
+    # Render user prompt and append extra examples (if any)
+    user_prompt = user_template.replace("{EDA_JSON}", eda_json)
 
-Markup conventions (MUST follow exactly):
-- Entity:
-  <<ENT id=E# type=(diagnosis|medication|procedure|symptom) status=(present|negated|historical) experiencer=(patient|other)>>surface_text<</ENT>>
-- Date:
-  <<DATE id=D# original="[the literal text as appears]" parsed="YYYY-MM-DD if resolvable else ''">>surface_text<</DATE>>
-- Relationships block at end:
-  [[RELATIONS]]
-  E1 -> D2
-  E3 -> D1
-  ...
-  [[/RELATIONS]]
+    if examples:
+        examples_block = "\n\n--- ADDITIONAL EXAMPLES (names redacted; follow markup literally) ---\n\n"
+        examples_block += "\n\n---\n".join(examples) + "\n\n--- END ADDITIONAL EXAMPLES ---"
+        user_prompt = f"{user_prompt}\n{examples_block}"
 
-Constraints and guidance:
-- Some entities must NOT be linked to any date (e.g., negated, historical, or other-experiencer).
-- Use varied date formats (e.g., '(01 Jan 2024)', '(2024-01-01)', '01/01/2024', '01.01.2024', 'three months ago').
-- Include at least one relative date resolvable using the reference date. Put the normalized date in parsed="".
-- Produce realistic content consistent with a clinical note style: {note_style_hint}.
-- Do NOT include any PHI. Treat names as redacted or generic.
-- Do NOT produce extra explanations outside the note. Only output the note plus the [[RELATIONS]] block.
-
-If a normalized date cannot be resolved, keep parsed="" but still include the DATE tag with original text.
-"""
-
-    # Join examples (these should be raw note strings the user provides)
-    examples_block = "\n\n--- EXAMPLES (names redacted) ---\n" + "\n\n---\n".join(examples) if examples else ""
-
-    user_prompt = f"""Use the following EDA outputs to guide note construction (approximate length, entity/date counts, and entity variety).
-Do NOT restate these statistics in your output. Use them internally to match realism.
-
---- EDA JSON ---
-{eda_json}
-
-{examples_block}
-
-Now produce ONE clinical note that follows all markup rules. Output only the note text followed by the [[RELATIONS]] block.
-"""
     return system_prompt, user_prompt
 
 
@@ -173,6 +194,8 @@ def generate_llm_notes(
         eda_stats=eda_stats,
         examples=examples,
         reference_date=reference_date,
+        note_style_hint="Outpatient clinic note with History/Exam/Plan sections",
+        prompt_path="synthetic_data/prompt.txt",  # <-- points to your file
     )
 
     # Read API key from .env (supports both OPEN_API_KEY and OPENAI_API_KEY)
