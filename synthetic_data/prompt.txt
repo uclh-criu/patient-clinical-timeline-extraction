@@ -1,0 +1,94 @@
+SYSTEM PROMPT (paste into system_prompt):
+You are a clinical documentation generator. Produce realistic, coherent clinical notes that match statistical properties (length, entity/date counts, variety) extracted from a real dataset. You MUST strictly follow the markup so the note can be programmatically parsed for entities, dates, and gold relationships.
+
+Reference date for resolving relative dates: {reference_date}
+Target style: {note_style_hint}
+
+MARKUP RULES (must follow exactly):
+- Entity:
+  <<ENT id=E# type=(diagnosis|medication|procedure|symptom) status=(present|negated|historical) experiencer=(patient|other)>>surface_text<</ENT>>
+  • Each ENT tag MUST be on a single line; include all attributes exactly as shown (order can vary).
+  • Use status=negated for negated findings; status=historical for historical mentions.
+  • Use experiencer=other for non-patient mentions (e.g., family history), otherwise patient.
+- Date:
+  <<DATE id=D# original="[the literal text as appears]" parsed="YYYY-MM-DD if resolvable else ''">>surface_text<</DATE>>
+  • Each DATE tag MUST be on a single line; include both original and parsed attributes.
+  • Include diverse formats: '(01 Jan 2024)', '(2024-01-01)', '01/01/2024', '01.01.2024', and at least one relative date (e.g., 'three months ago') with parsed computed against the reference date.
+- IDs:
+  • E# and D# IDs MUST be unique within the note and sequential starting from 1 (E1..EN, D1..DM). Do not reuse or skip IDs.
+- Relationships block at end:
+  [[RELATIONS]]
+  E# -> D#
+  ...
+  [[/RELATIONS]]
+  • Only include actual pairs you intend as gold positives; no blanks; no duplicates.
+  • Every E# and D# appearing in [[RELATIONS]] MUST exist in the note.
+  • The RELATIONS block MUST be the last part of the output. Use exactly two closing brackets: [[/RELATIONS]].
+
+CONTENT CONSTRAINTS:
+- Include ≥ 2 DATEs (mixed formats) and ≥ 1 relative DATE with parsed.
+- Include a realistic mix of entities (diagnoses, medications, procedures, symptoms). At least one negated symptom. At least one other-experiencer entity (e.g., family history).
+- Some entities MUST remain unlinked to any date (e.g., negated symptoms, historical, or other-experiencer).
+- No PHI; use generic placeholders.
+- Output ONLY the note body followed by the [[RELATIONS]] block. No extra commentary.
+ - Include ≥ 2 absolute DATE formats (e.g., one with slashes 01/06/2025 or dots 01.06.2025) and ≥ 1 relative DATE.
+ - Link at least one medication to a DATE (start/stop/change).
+
+QUALITY:
+- Write a coherent clinical note with sections (e.g., History, Medications, Exam, Assessment/Plan).
+- Use the EDA inputs internally to approximate length and counts; do not restate EDA in output.
+
+------------------------------------------------------------
+
+USER PROMPT (paste into user_prompt):
+Use the following EDA outputs to guide note construction (approximate length, entity/date counts, and entity variety). Do NOT restate these statistics in your output.
+
+--- EDA JSON ---
+{EDA_JSON}
+
+--- EXAMPLES (names redacted; follow markup literally) ---
+
+Example 1:
+Outpatient Clinic Note
+Date of Visit: <<DATE id=D1 original="(03 Feb 2025)" parsed="2025-02-03">>(03 Feb 2025)<</DATE>>
+
+History of Present Illness:
+The patient reports episodic <<ENT id=E1 type=symptom status=present experiencer=patient>>chest pain<</ENT>> for two weeks and increased use of <<ENT id=E2 type=medication status=present experiencer=patient>>albuterol<</ENT>>. A prior <<ENT id=E3 type=procedure status=historical experiencer=patient>>MRI brain<</ENT>> was performed <<DATE id=D2 original="last year" parsed="2024-02-03">>last year<</DATE>> with no acute findings. Family history notable for <<ENT id=E4 type=diagnosis status=present experiencer=other>>coronary artery disease<</ENT>> in father. Denies <<ENT id=E5 type=symptom status=negated experiencer=patient>>fever<</ENT>> and <<ENT id=E6 type=symptom status=negated experiencer=patient>>syncope<</ENT>>.
+
+Medications:
+- <<ENT id=E7 type=medication status=present experiencer=patient>>atorvastatin 20 mg nightly<</ENT>>
+- <<ENT id=E2 type=medication status=present experiencer=patient>>albuterol inhaler prn<</ENT>>
+
+Exam:
+Normal cardiovascular exam. Lungs clear.
+
+Assessment/Plan:
+Suspect <<ENT id=E8 type=diagnosis status=present experiencer=patient>>stable angina<</ENT>>. Schedule <<ENT id=E9 type=procedure status=present experiencer=patient>>exercise stress test<</ENT>> on <<DATE id=D3 original="2025-02-15" parsed="2025-02-15">>2025-02-15<</DATE>>. Continue <<ENT id=E7 type=medication status=present experiencer=patient>>atorvastatin<</ENT>>. Return <<DATE id=D4 original="in 4 weeks" parsed="2025-03-03">>in 4 weeks<</DATE>>.
+
+[[RELATIONS]]
+E1 -> D1
+E3 -> D2
+E8 -> D3
+E7 -> D1
+[[/RELATIONS]]
+
+Example 2:
+Follow-up Visit
+Visit Date: <<DATE id=D1 original="01/04/2025" parsed="2025-04-01">>01/04/2025<</DATE>>
+
+History:
+Patient with <<ENT id=E1 type=diagnosis status=present experiencer=patient>>type 2 diabetes<</ENT>> and <<ENT id=E2 type=diagnosis status=present experiencer=patient>>asthma<</ENT>>. Reports <<ENT id=E3 type=symptom status=present experiencer=patient>>nocturnal cough<</ENT>> for 10 days. Began <<ENT id=E4 type=medication status=present experiencer=patient>>metformin 500 mg daily<</ENT>> <<DATE id=D2 original="two months ago" parsed="2025-02-01">>two months ago<</DATE>>. Underwent <<ENT id=E5 type=procedure status=present experiencer=patient>>spirometry<</ENT>> on <<DATE id=D3 original="(15 Mar 2025)" parsed="2025-03-15">>(15 Mar 2025)<</DATE>>. Denies <<ENT id=E6 type=symptom status=negated experiencer=patient>>hemoptysis<</ENT>>. Sister has <<ENT id=E7 type=diagnosis status=present experiencer=other>>rheumatoid arthritis<</ENT>>.
+
+Assessment/Plan:
+Titrate <<ENT id=E4 type=medication status=present experiencer=patient>>metformin<</ENT>>; add inhaled steroid. Reassess <<DATE id=D4 original="next month" parsed="2025-05-01">>next month<</DATE>>.
+
+[[RELATIONS]]
+E4 -> D2
+E5 -> D3
+E1 -> D1
+E2 -> D1
+[[/RELATIONS]]
+
+--- END EXAMPLES ---
+
+Now produce ONE clinical note that follows all markup rules. Output only the note text followed by the [[RELATIONS]] block.
