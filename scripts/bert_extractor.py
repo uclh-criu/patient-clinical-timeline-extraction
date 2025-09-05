@@ -44,11 +44,18 @@ def mark_date(text, date, marker="[D]"):
 def preprocess_input(note_text, entity, date, window_size=100, entity_marker='[E]', date_marker='[D]'):
     """
     Prepare the input text for BERT by extracting a context window and marking entity/date.
+    Uses the raw/original date string and its positions.
     """
-    context = get_context_window(note_text, entity['start'], date['start'], window_size)
+    # Use the original/raw date string and its positions
+    date_start = date.get('start')
+    date_end = date.get('end')
+    entity_start = entity['start']
+    entity_end = entity['end']
+
+    context = get_context_window(note_text, entity_start, date_start, window_size)
     # Find entity and date positions in context
-    entity_text = note_text[entity['start']:entity['end']]
-    date_text = note_text[date['start']:date['end']]
+    entity_text = note_text[entity_start:entity_end]
+    date_text = note_text[date_start:date_end]
     entity_offset = context.find(entity_text)
     date_offset = context.find(date_text)
     entity_span = (entity_offset, entity_offset + len(entity_text))
