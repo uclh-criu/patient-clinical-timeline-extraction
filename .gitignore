@@ -8,6 +8,7 @@ models/ade_relcat_model/
 model.safetensors
 bert_model_training/models/
 bert_model_training/base_model/
+bert_model_training/bert_finetuned/
 experiment_outputs/
 llama_test.py
 temp.py
