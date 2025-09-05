@@ -6,7 +6,7 @@ def load_prompt_template(prompt_path):
     with open(prompt_path, "r", encoding="utf-8") as f:
         return f.read()
 
-def make_binary_prompt(entity, date, note_text, prompt_filename, max_note_len=300):
+def make_binary_prompt(entity, date, note_text, prompt_filename):
     """
     Create a prompt for binary classification of entity-date relationship.
     Args:
@@ -14,20 +14,21 @@ def make_binary_prompt(entity, date, note_text, prompt_filename, max_note_len=30
         date (dict): Date info.
         note_text (str): The clinical note.
         prompt_filename (str): Filename of the prompt template (e.g., "prompt1.txt").
-        max_note_len (int): Max length of note text to include.
     Returns:
         str: The full prompt for the model.
     """
-    # Always resolve path relative to this file, into the prompts/ folder
-    prompt_dir = os.path.join(os.path.dirname(__file__), "prompts")
+    # Find the project root (assume scripts/ is always one level below root)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, ".."))
+    prompt_dir = os.path.join(project_root, "prompts")
     prompt_path = os.path.join(prompt_dir, prompt_filename)
     prompt_template = load_prompt_template(prompt_path)
 
     prompt = (
         prompt_template + "\n"
         f"Entity: {entity['label']}\n"
-        f"Date: {date['parsed']}\n"
-        f"Note: {note_text[:max_note_len]}\n"
+        f"Date: {date.get('original', date.get('raw', date['parsed']))}\n"
+        f"Note: {note_text}\n"
         "Answer:"
     )
     return prompt
