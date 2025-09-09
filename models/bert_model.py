@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from transformers import AutoModel
 
-
 class BertRC(nn.Module):
     """
     Custom BERT model with explicit span pooling for relation extraction.
