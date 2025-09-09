@@ -1,0 +1,12 @@
+torch
+torchvision
+numpy
+pandas
+scikit-learn
+tqdm
+transformers
+tokenizers
+openai
+medcat==1.16.0
+python-dotenv
+ipykernel
