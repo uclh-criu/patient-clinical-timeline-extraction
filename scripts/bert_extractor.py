@@ -1,13 +1,114 @@
+"""
+BERT-based relation extraction utilities.
+
+This module provides functions for preprocessing clinical text and performing
+relation extraction using BERT models. It uses full-text context with distinct
+entity markers for better relation extraction performance.
+"""
+
+def mark_entities_full_text(text, disorder_start, disorder_end, date_start, date_end, 
+                           disorder_text, date_text):
+    """
+    Mark entities in full text with distinct markers for better entity type recognition.
+    
+    Args:
+        text: Full clinical note text
+        disorder_start, disorder_end: Character positions of disorder entity
+        date_start, date_end: Character positions of date entity
+        disorder_text, date_text: Text content of the entities
+        
+    Returns:
+        Text with entities marked as [E1] disorder_text [/E1] and [E2] date_text [/E2]
+    """
+    marked = text
+    # Insert markers in reverse order (rightmost first) to avoid position shifts
+    for span, token1, token2, ent_text, span_end in sorted(
+        [(disorder_start, "[E1]", "[/E1]", disorder_text, disorder_end),
+         (date_start, "[E2]", "[/E2]", date_text, date_end)],
+        reverse=True
+    ):
+        marked = marked[:span] + f"{token1} {ent_text} {token2}" + marked[span_end:]
+    return marked
+
+
+def preprocess_input(note_text, disorder, date):
+    """
+    Preprocess input using full text approach with position-based labeling.
+    
+    This is the main preprocessing function that:
+    1. Extracts entity positions and text
+    2. Marks entities with distinct markers
+    3. Returns structured data for training/inference
+    
+    Args:
+        note_text: Full clinical note text
+        disorder: Disorder entity dict with 'start', 'end' keys
+        date: Date entity dict with 'start', 'end', 'original' keys
+        
+    Returns:
+        Dictionary with 'text', 'marked_text', entity positions, and metadata
+    """
+    disorder_start, disorder_end = disorder['start'], disorder['end']
+    date_start = date.get('start', None)
+    if date_start is None:
+        date_start = note_text.find(date['original'])
+    date_end = date_start + len(date['original'])
+    
+    disorder_text = note_text[disorder_start:disorder_end]
+    date_text = note_text[date_start:date_end]
+    
+    marked_text = mark_entities_full_text(
+        note_text, disorder_start, disorder_end, date_start, date_end,
+        disorder_text, date_text
+    )
+    
+    return {
+        'text': note_text,
+        'marked_text': marked_text,
+        'ent1_start': disorder_start, 'ent1_end': disorder_end,
+        'ent2_start': date_start, 'ent2_end': date_end
+    }
+
+
+def bert_extraction(note_text, disorder, date, model, tokenizer):
+    """
+    Predict if a disorder and date are related using BERT.
+    
+    This function performs end-to-end relation extraction:
+    1. Preprocesses the text with entity markers
+    2. Tokenizes the input
+    3. Runs inference with the model
+    4. Returns prediction and confidence
+    
+    Args:
+        note_text: Full clinical note text
+        disorder: Disorder entity dict
+        date: Date entity dict
+        model: Trained BERT model (BertRC or standard)
+        tokenizer: Tokenizer with special tokens
+        
+    Returns:
+        Tuple of (prediction, confidence) where prediction is 0 or 1
+    """
+    processed = preprocess_input(note_text, disorder, date)
+    input_text = processed['marked_text']
+    
+    inputs = tokenizer(input_text, return_tensors="pt", truncation=True, padding=True, max_length=256)
+    outputs = model(**inputs)
+    logits = outputs.logits
+    prediction = logits.argmax().item()
+    confidence = logits.softmax(dim=1).max().item()
+    return prediction, confidence
+
+
+# ============================================================================
+# LEGACY FUNCTIONS (kept for backward compatibility)
+# ============================================================================
+
 def get_context_window(note_text, entity_start, date_start, window_size=100):
     """
     Extract a window of text around the entity and date positions.
-    Args:
-        note_text (str): The full clinical note.
-        entity_start (int): Start index of the entity in the note.
-        date_start (int): Start index of the date in the note.
-        window_size (int): Number of characters to include before and after the min/max position.
-    Returns:
-        str: The extracted context window.
+    Legacy function - use preprocess_input for new code.
     """
     min_pos = min(entity_start, date_start)
     max_pos = max(entity_start, date_start)
@@ -15,80 +116,20 @@ def get_context_window(note_text, entity_start, date_start, window_size=100):
     end = min(len(note_text), max_pos + window_size)
     return note_text[start:end]
 
+
 def mark_entity(text, entity, marker="[E]"):
     """
     Insert a marker around the entity in the text.
-    Args:
-        text (str): The context window.
-        entity (dict): Entity with 'start' and 'end' positions.
-        marker (str): Marker to use for the entity.
-    Returns:
-        str: Text with the entity marked.
+    Legacy function - use mark_entities_full_text for new code.
     """
     start, end = entity['start'], entity['end']
     return text[:start] + marker + text[start:end] + marker + text[end:]
 
+
 def mark_date(text, date, marker="[D]"):
     """
     Insert a marker around the date in the text.
-    Args:
-        text (str): The context window.
-        date (dict): Date with 'start' and 'end' positions.
-        marker (str): Marker to use for the date.
-    Returns:
-        str: Text with the date marked.
+    Legacy function - use mark_entities_full_text for new code.
     """
     start, end = date['start'], date['end']
     return text[:start] + marker + text[start:end] + marker + text[end:]
-
-def preprocess_input(note_text, entity, date, window_size=100, entity_marker='[E]', date_marker='[D]'):
-    """
-    Prepare the input text for BERT by extracting a context window and marking entity/date.
-    Uses the raw/original date string and its positions.
-    """
-    # Use the original/raw date string and its positions
-    date_start = date.get('start')
-    date_end = date.get('end')
-    entity_start = entity['start']
-    entity_end = entity['end']
-
-    context = get_context_window(note_text, entity_start, date_start, window_size)
-    # Find entity and date positions in context
-    entity_text = note_text[entity_start:entity_end]
-    date_text = note_text[date_start:date_end]
-    entity_offset = context.find(entity_text)
-    date_offset = context.find(date_text)
-    entity_span = (entity_offset, entity_offset + len(entity_text))
-    date_span = (date_offset, date_offset + len(date_text))
-
-    # Insert markers in reverse order (rightmost first)
-    spans = sorted([('entity', *entity_span), ('date', *date_span)], key=lambda x: x[1], reverse=True)
-    marked = context
-    for label, start, end in spans:
-        if label == 'entity':
-            marked = marked[:start] + entity_marker + marked[start:end] + entity_marker + marked[end:]
-        else:
-            marked = marked[:start] + date_marker + marked[start:end] + date_marker + marked[end:]
-    return marked
-
-def bert_extraction(note_text, entity, date, model, tokenizer, window_size=100):
-    """
-    Predict if an entity and date are related using BERT.
-    Args:
-        note_text (str): The full clinical note.
-        entity (dict): Entity with 'start', 'end', 'label'.
-        date (dict): Date with 'start', 'end', 'parsed'.
-        model: HuggingFace model.
-        tokenizer: HuggingFace tokenizer.
-        window_size (int): Context window size.
-    Returns:
-        int: Prediction (0 or 1).
-        float: Confidence score.
-    """
-    input_text = preprocess_input(note_text, entity, date, window_size)
-    inputs = tokenizer(input_text, return_tensors="pt", truncation=True, padding=True, max_length=512)
-    outputs = model(**inputs)
-    logits = outputs.logits
-    prediction = logits.argmax().item()
-    confidence = logits.softmax(dim=1).max().item()
-    return prediction, confidence
