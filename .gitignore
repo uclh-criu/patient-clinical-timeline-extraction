@@ -1,8 +1,11 @@
 __pycache__/
-Llama-3.2-3B-Instruct/
-/venv
-bert_model_training/
 .env
+/venv
+Llama-3.2-3B-Instruct/
+bert_model_training/
+notebooks/results/
 
-# Ignore all csv files
+# Ignore all data files
 *.csv
+*.json
+*.tsv
