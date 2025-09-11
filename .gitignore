@@ -2,7 +2,7 @@ __pycache__/
 .env
 /venv
 Llama-3.2-3B-Instruct/
-bert_model_training/
+models/relcat_models/
 notebooks/bert_rc_results/
 test_relative_dates.ipynb
 
