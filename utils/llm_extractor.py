@@ -26,8 +26,10 @@ def make_binary_prompt(entity, date, note_text, prompt_filename):
 
     prompt = (
         prompt_template + "\n"
-        f"Entity: {entity['label']}\n"
-        f"Date: {date.get('original', date.get('raw', date['parsed']))}\n"
+        # f"Entity: {entity['label']}\n"
+        # f"Date: {date.get('original', date.get('raw', date['parsed']))}\n"
+        f"Entity: {entity['value']}\n"
+        f"Date: {date['value']}\n"
         f"Note: {note_text}\n"
         "Answer:"
     )
