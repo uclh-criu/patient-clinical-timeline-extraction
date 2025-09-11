@@ -7,7 +7,7 @@ class BertRC(nn.Module):
     Custom BERT model with explicit span pooling for relation extraction.
     
     This model is specifically designed for relation extraction tasks where we need to
-    identify relationships between two entities (disorder and date) in clinical text.
+    identify relationships between two entities (clinical entity and date) in clinical text.
     It uses span pooling to explicitly focus on the entity representations rather than
     relying on attention mechanisms alone.
     """
