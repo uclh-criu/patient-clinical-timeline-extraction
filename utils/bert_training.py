@@ -17,14 +17,9 @@ def create_training_pairs(samples, max_length=256):
     all_samples = []
     
     for sample in samples:
-        # Build gold lookup
-        # gold_map = build_gold_lookup(sample['relationship_gold'])
         gold_set = build_gold_lookup(sample['links_json'])
         
-        # Iterate pairs
-        # for disorder in sample['entities_list']:
-        #     for date in sample['dates']:
-        #         label_str = get_label_for_pair(disorder['start'], date['start'], gold_map)
+        # Process absolute dates
         for entity in sample['entities_list']:
             for date in sample['dates']:
                 label_str = get_label_for_pair(entity['value'], date['value'], gold_set)
@@ -35,10 +30,25 @@ def create_training_pairs(samples, max_length=256):
 
                 processed['patient_id'] = sample.get('patient_id', '')
                 processed['note_id'] = sample.get('note_id', '')
-                # processed['distance'] = abs(disorder['start'] - date['start'])
                 processed['distance'] = abs(entity['start'] - date['start'])
                 
                 all_samples.append(processed)
+        
+        # Process relative dates
+        if 'relative_dates' in sample and sample['relative_dates']:
+            for entity in sample['entities_list']:
+                for rel_date in sample['relative_dates']:
+                    label_str = get_label_for_pair(entity['value'], rel_date['value'], gold_set)
+                    label = 1 if label_str == 'link' else 0
+                    
+                    processed = preprocess_input(sample['note_text'], entity, rel_date)
+                    processed['label'] = label
+
+                    processed['patient_id'] = sample.get('patient_id', '')
+                    processed['note_id'] = sample.get('note_id', '')
+                    processed['distance'] = abs(entity['start'] - rel_date['start'])
+                    
+                    all_samples.append(processed)
     
     return pd.DataFrame(all_samples)
 

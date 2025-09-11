@@ -14,9 +14,6 @@ def parse_jsonish(s):
 def load_data(file_path):
     """Load CSV data and parse JSON columns"""
     df = pd.read_csv(file_path)
-    # df['extracted_disorders'] = df['extracted_disorders'].apply(json.loads)
-    # df['formatted_dates'] = df['formatted_dates'].apply(json.loads)
-    # df['relationship_gold'] = df['relationship_gold'].apply(json.loads)
     if 'entities_json' in df.columns:
         df['entities_json'] = df['entities_json'].apply(parse_jsonish)
     if 'dates_json' in df.columns:
@@ -28,9 +25,6 @@ def load_data(file_path):
 
 def prepare_sample(row):
     """Prepare a single row for extractor input"""
-    # entities_list = row['extracted_disorders']
-    # dates = row['formatted_dates']
-    # note_text = row['note']
     entities_list = row['entities_json']
     dates = row['dates_json']
     note_text = row['note_text']
@@ -41,32 +35,51 @@ def prepare_all_samples(df):
     samples = []
     for _, row in df.iterrows():
         note_text, entities_list, dates = prepare_sample(row)
+        
+        # Get relative dates if available
+        relative_dates = []
+        if 'relative_dates_json' in row and pd.notna(row['relative_dates_json']):
+            relative_dates = json.loads(row['relative_dates_json'])
+        
         samples.append({
             'note_text': note_text,
             'entities_list': entities_list,
-            'dates': dates,
-            # 'relationship_gold': row['relationship_gold'],
-            # 'patient_id': row['patient'],
-            # 'note_id': row['note_id']
+            'dates': dates,  # Absolute dates
+            'relative_dates': relative_dates,  # Relative dates
             'links_json': row.get('links_json', []),
             'doc_id': row.get('doc_id')
         })
     return samples
 
-def get_entity_date_pairs(entities_list, dates):
-    """Get all possible entity-date pairs for classification"""
+def get_entity_date_pairs(entities_list, dates, relative_dates=None):
+    """Get all possible entity-date pairs for classification, including relative dates"""
     pairs = []
+    
+    # Add absolute date pairs
     for entity in entities_list:
         for date_info in dates:
             pairs.append({
                 'entity': entity,
                 'date_info': date_info,
-                # 'entity_label': entity['label'],
-                # 'date': date_info['parsed'],
                 'entity_label': entity['value'],
                 'date': date_info['value'],
-                'distance': abs(entity['start'] - date_info['start'])
+                'distance': abs(entity['start'] - date_info['start']),
+                'date_type': 'absolute'
             })
+    
+    # Add relative date pairs if provided
+    if relative_dates:
+        for entity in entities_list:
+            for rel_date in relative_dates:
+                pairs.append({
+                    'entity': entity,
+                    'date_info': rel_date,
+                    'entity_label': entity['value'],
+                    'date': rel_date['value'],  # Original phrase like "last week"
+                    'distance': abs(entity['start'] - rel_date['start']),
+                    'date_type': 'relative'
+                })
+    
     return pairs
 
 def calculate_metrics(all_predictions, df):
@@ -80,11 +93,8 @@ def calculate_metrics(all_predictions, df):
     # Get all gold pairs from dataframe
     gold_pairs = set()
     for _, row in df.iterrows():
-        # for g in row['relationship_gold']:
         for g in row['links_json']:
             date = g['date']
-            # for diagnosis in g['diagnoses']:
-            #     gold_pairs.add((diagnosis['diagnosis'], date))
             gold_pairs.add((g['entity'], date))
     
     # Calculate metrics
