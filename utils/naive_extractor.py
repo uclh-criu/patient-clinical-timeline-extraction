@@ -20,13 +20,15 @@ def naive_extraction(entities_list, dates, max_distance=200):
             
             if distance < min_distance and distance <= max_distance:
                 min_distance = distance
-                closest_date = date_info['parsed']
+                #closest_date = date_info['parsed']
+                closest_date = date_info['value']
                 
         # Add relationship if found
         if closest_date:
             relationships.append({
-                'entity_label': entity['label'],
-                'entity_category': entity.get('category', 'disorder'),
+                #'entity_label': entity['label'],
+                #'entity_category': entity.get('category', 'disorder'),
+                'entity_label': entity['value'],
                 'date': closest_date,
                 'confidence': 1.0,
                 'distance': min_distance

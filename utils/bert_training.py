@@ -8,40 +8,35 @@ from utils import get_entity_date_pairs
 from bert_extractor import preprocess_input
 
 def build_gold_lookup(gold_relations):
-    gold_map = {}
-    for g in gold_relations:
-        date_pos = g["date_position"]
-        for diag in g.get("diagnoses", []):
-            gold_map[(diag["position"], date_pos)] = "link"
-    return gold_map
+    return set((g["entity"], g["date"]) for g in gold_relations)
 
-def get_label_for_pair(disorder_start, date_start, gold_map):
-    key = (disorder_start, date_start)
-    return gold_map.get(key, "no_link")
+def get_label_for_pair(entity_value, date_value, gold_set):
+    return "link" if (entity_value, date_value) in gold_set else "no_link"
 
 def create_training_pairs(samples, max_length=256):
     all_samples = []
     
     for sample in samples:
-        # Build gold lookup for position-based labeling
-        gold_map = build_gold_lookup(sample['relationship_gold'])
+        # Build gold lookup
+        # gold_map = build_gold_lookup(sample['relationship_gold'])
+        gold_set = build_gold_lookup(sample['links_json'])
         
-        # Get all disorder-date pairs
-        for disorder in sample['entities_list']:
+        # Iterate pairs
+        # for disorder in sample['entities_list']:
+        #     for date in sample['dates']:
+        #         label_str = get_label_for_pair(disorder['start'], date['start'], gold_map)
+        for entity in sample['entities_list']:
             for date in sample['dates']:
-                # Get label using position-based method
-                label_str = get_label_for_pair(disorder['start'], date['start'], gold_map)
-                # Convert string label to integer
+                label_str = get_label_for_pair(entity['value'], date['value'], gold_set)
                 label = 1 if label_str == 'link' else 0
                 
-                # Preprocess text
-                processed = preprocess_input(sample['note_text'], disorder, date)
+                processed = preprocess_input(sample['note_text'], entity, date)
                 processed['label'] = label
-                
-                # Add metadata for analysis
+
                 processed['patient_id'] = sample.get('patient_id', '')
                 processed['note_id'] = sample.get('note_id', '')
-                processed['distance'] = abs(disorder['start'] - date['start'])
+                # processed['distance'] = abs(disorder['start'] - date['start'])
+                processed['distance'] = abs(entity['start'] - date['start'])
                 
                 all_samples.append(processed)
     
