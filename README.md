@@ -14,14 +14,14 @@ The repository provides utility functions for these extraction methods, and note
 
 ## Data Pipelines
 
-### Pipeline 1: MedCAT Trainer (Recommended for Training)
+### Training Pipeline (MedCAT Trainer)
 1. Upload a CSV file with columns `name` and `text` to [MedCAT Trainer](https://github.com/CogStack/MedCATtrainer)
 2. Annotate entities, dates, and relationships using the MedCAT Trainer interface
 3. Download the JSON export and run through `create_dataset.ipynb`
 4. This creates `medcat_trainer_dataset.csv` with all required columns including ground truth relationships
 5. Use this dataset for training and evaluation of all extractors
 
-### Pipeline 2: Offline/Inference (For Production)
+### Inference Pipeline
 1. Use the [MedCAT library](https://github.com/CogStack/cogstack-nlp) to extract entities
 2. Use [AnonCAT](https://github.com/antsh3k/deidentify) to extract absolute dates
 3. Use the built-in relative date extractor to find relative date phrases
@@ -58,18 +58,6 @@ All data files should be stored within the `data` folder.
    ```bash
    pip install -r requirements.txt
    ```
-
-### Training and Development
-
-1. **MedCAT Trainer Pipeline**: Run `create_dataset.ipynb` first, then proceed to experiment notebooks
-2. Use the generated `medcat_trainer_dataset.csv` for training all extractors
-3. The labeled relationships in `links_json` provide ground truth for evaluation
-
-### Production Inference
-
-1. **Offline Pipeline**: Go directly to experiment notebooks with your unlabeled data
-2. The experiment notebooks will automatically extract relative dates from text if the `relative_dates_json` column is missing
-3. No `links_json` required for inference - the extractors will predict relationships
 
 ### Extractor Customisation & Configuration
 
