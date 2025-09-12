@@ -115,7 +115,12 @@ def doc_to_links_json(links):
 def doc_to_links_value_json(links, id2value):
     """JSON for value pairs; uses provided {id: value} mapping."""
     links_value = [
-        {"date": id2value.get(L["date_id"]), "entity": id2value.get(L["entity_id"])}
+        {
+            "date": id2value.get(L["date_id"]), 
+            "entity": id2value.get(L["entity_id"]),
+            "date_id": L["date_id"],
+            "entity_id": L["entity_id"]
+        }
         for L in links
     ]
     return json.dumps(links_value, ensure_ascii=False)
