@@ -5,7 +5,7 @@ This repository provides a set of tools for constructing patient clinical timeli
 You can choose between four different methods for relation extraction between clinical entities and dates, which are used to construct the timelines. 
 
 These are:
-1. **Naive heuristic model** which finds the nearest date within a maximum distance for each clinical entity
+1. **Naive model** which finds the nearest date within a maximum distance of characters for each clinical entity
 2. **Finetuned BERT model** for binary relation classification between dates and clinical entities with span pooling to focus on entity representations 
 3. **LLM** approach with prompting for binary relation classification between dates and clinical entities
 4. **[RelCAT](https://arxiv.org/abs/2501.16077)**, a module of the [MedCAT](https://arxiv.org/abs/2010.01165) framework, specifically designed for relation extraction between entities in clinical text
@@ -44,13 +44,13 @@ This pipeline uses the [MedCAT Trainer](https://github.com/CogStack/MedCATtraine
 Steps:
 1. Upload the raw CSV file to MedCAT Trainer. Note the column names will need to be changed, see the [MedCAT Trainer Documentation](https://medcattrainer.readthedocs.io/en/latest/) for further details
 2. Annotate entities, dates, and relationships using the MedCAT Trainer interface
-3. Download the JSON export and run this through the `create_training_dataset.ipynb` notebook
+3. Download the JSON export and run this through the `create_training_dataset.ipynb` notebook. An example json file is provided in `data/MedCAT_Export.json` if you wish to try the training process without having to do the manual labelling
 4. This creates `training_dataset.csv` with all required columns including ground truth relationships
 5. Use this dataset for training and evaluation of all extractors in the `notebooks_training` folder
 
 #### 2. Inference Pipeline
 
-This pipeline is designed for processing new documents at scale and doesn't require manual labelling. It uses the [MedCAT library](https://github.com/CogStack/cogstack-nlp/blob/main/medcat-v2/README.md) to extract entities and various utility functions to extract dates.
+This pipeline is designed for processing new documents at scale and doesn't require manual labelling. It uses the [MedCAT library](https://github.com/CogStack/cogstack-nlp/blob/main/medcat-v2/README.md) to extract entities, various utility functions to extract dates and the trained models to do the relation extraction between them.
 
 Steps:
 1. Run the raw CSV file through the `create_inference_dataset.ipynb` notebook
@@ -60,11 +60,5 @@ Steps:
 #### 3. Post-Processing Pipeline
 
 This pipeline aggregates aggregates notes by individual patient and uses the predicted relations to construct the final patient timelines.
-
-**TBC**
-
-### Extractor Customisation & Configuration
-
-#### LLM Extractors
 
 **TBC**
