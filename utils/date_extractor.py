@@ -3,6 +3,37 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import json
+import datefinder
+
+def extract_absolute_dates(text: str) -> List[Dict[str, Any]]:
+    """
+    Extract absolute dates from text using datefinder.
+    
+    Args:
+        text: Clinical note text
+        
+    Returns:
+        List of absolute date dictionaries with original text and positions
+    """
+    if not text:
+        return []
+    
+    absolute_dates = []
+    
+    for date_obj, source_str, indices in datefinder.find_dates(
+        text, 
+        source=True, 
+        index=True, 
+        strict=False
+    ):
+        absolute_dates.append({
+            'id': f"abs_{len(absolute_dates) + 1}",
+            'value': source_str,
+            'start': indices[0],
+            'end': indices[1]
+        })
+    
+    return absolute_dates
 
 # Patterns where we can confidently calculate dates
 RELATIVE_DATE_PATTERNS = [
