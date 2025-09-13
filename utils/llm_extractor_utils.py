@@ -17,17 +17,15 @@ def make_binary_prompt(entity, date, note_text, prompt_filename):
     Returns:
         str: The full prompt for the model.
     """
-    # Find the project root (assume scripts/ is always one level below root)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(script_dir, ".."))
+    # Find the project root (assume utils/ is always one level below root)
+    utils_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(utils_dir, ".."))
     prompt_dir = os.path.join(project_root, "prompts")
     prompt_path = os.path.join(prompt_dir, prompt_filename)
     prompt_template = load_prompt_template(prompt_path)
 
     prompt = (
         prompt_template + "\n"
-        # f"Entity: {entity['label']}\n"
-        # f"Date: {date.get('original', date.get('raw', date['parsed']))}\n"
         f"Entity: {entity['value']}\n"
         f"Date: {date['value']}\n"
         f"Note: {note_text}\n"

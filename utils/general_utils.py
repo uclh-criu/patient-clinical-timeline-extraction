@@ -18,8 +18,8 @@ def load_data(file_path):
         df['entities_json'] = df['entities_json'].apply(parse_jsonish)
     if 'dates_json' in df.columns:
         df['dates_json'] = df['dates_json'].apply(parse_jsonish)
-    if 'links_json' in df.columns:
-        df['links_json'] = df['links_json'].apply(parse_jsonish)
+    if 'relations_json' in df.columns:
+        df['relations_json'] = df['relations_json'].apply(parse_jsonish)
 
     return df
 
@@ -42,12 +42,12 @@ def prepare_all_samples(df):
             relative_dates = json.loads(row['relative_dates_json'])
         
         samples.append({
+            'doc_id': row.get('doc_id'),
             'note_text': note_text,
             'entities_list': entities_list,
-            'dates': dates,  # Absolute dates
-            'relative_dates': relative_dates,  # Relative dates
-            'links_json': row.get('links_json', []),
-            'doc_id': row.get('doc_id')
+            'dates': dates,
+            'relative_dates': relative_dates,
+            'relations_json': row.get('relations_json', [])
         })
     return samples
 
@@ -75,7 +75,7 @@ def get_entity_date_pairs(entities_list, dates, relative_dates=None):
                     'entity': entity,
                     'date_info': rel_date,
                     'entity_label': entity['value'],
-                    'date': rel_date['value'],  # Original phrase like "last week"
+                    'date': rel_date['value'],
                     'distance': abs(entity['start'] - rel_date['start']),
                     'date_type': 'relative'
                 })
@@ -93,7 +93,7 @@ def calculate_metrics(all_predictions, df):
     # Get all gold pairs from dataframe
     gold_pairs = set()
     for _, row in df.iterrows():
-        for g in row['links_json']:
+        for g in row['relations_json']:
             date = g['date']
             gold_pairs.add((g['entity'], date))
     

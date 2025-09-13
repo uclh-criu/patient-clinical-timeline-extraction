@@ -1,6 +1,7 @@
 def mark_entities_full_text(text, entity_start, entity_end, date_start, date_end, 
                             entity_text, date_text):
     marked = text
+    
     # Insert markers in reverse order (rightmost first) to avoid position shifts
     for span, token1, token2, ent_text, span_end in sorted(
         [
@@ -10,19 +11,18 @@ def mark_entities_full_text(text, entity_start, entity_end, date_start, date_end
         reverse=True
     ):
         marked = marked[:span] + f"{token1} {ent_text} {token2}" + marked[span_end:]
+    
     return marked
 
 def preprocess_input(note_text, entity, date):
-    #disorder_start, disorder_end = disorder['start'], disorder['end']
+    
     entity_start, entity_end = entity['start'], entity['end']
     date_start = date.get('start', None)
+    
     if date_start is None:
-        #date_start = note_text.find(date['original'])
         date_start = note_text.find(date['value'])
-    #date_end = date_start + len(date['original'])
     date_end = date_start + len(date['value'])
     
-    #disorder_text = note_text[disorder_start:disorder_end]
     entity_text = note_text[entity_start:entity_end]
     date_text = note_text[date_start:date_end]
 

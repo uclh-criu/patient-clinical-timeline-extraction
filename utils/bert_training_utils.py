@@ -1,29 +1,27 @@
 import pandas as pd
 import torch
 from collections import Counter
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
-from utils import get_entity_date_pairs
-from bert_extractor import preprocess_input
+from bert_extractor_utils import preprocess_input
 
 def build_gold_lookup(gold_relations):
     return set((g["entity"], g["date"]) for g in gold_relations)
 
 def get_label_for_pair(entity_value, date_value, gold_set):
-    return "link" if (entity_value, date_value) in gold_set else "no_link"
+    return "relation" if (entity_value, date_value) in gold_set else "no_relation"
 
 def create_training_pairs(samples, max_length=256):
     all_samples = []
     
     for sample in samples:
-        gold_set = build_gold_lookup(sample['links_json'])
+        gold_set = build_gold_lookup(sample['relations_json'])
         
         # Process absolute dates
         for entity in sample['entities_list']:
             for date in sample['dates']:
                 label_str = get_label_for_pair(entity['value'], date['value'], gold_set)
-                label = 1 if label_str == 'link' else 0
+                label = 1 if label_str == 'relation' else 0
                 
                 processed = preprocess_input(sample['note_text'], entity, date)
                 processed['label'] = label
@@ -39,7 +37,7 @@ def create_training_pairs(samples, max_length=256):
             for entity in sample['entities_list']:
                 for rel_date in sample['relative_dates']:
                     label_str = get_label_for_pair(entity['value'], rel_date['value'], gold_set)
-                    label = 1 if label_str == 'link' else 0
+                    label = 1 if label_str == 'relation' else 0
                     
                     processed = preprocess_input(sample['note_text'], entity, rel_date)
                     processed['label'] = label
