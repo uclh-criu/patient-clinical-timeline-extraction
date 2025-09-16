@@ -68,21 +68,31 @@ def compute_class_weights(dataset, num_labels):
     weights = [w / mean_w for w in weights]
     return torch.tensor(weights, dtype=torch.float)
 
-def balance_classes(df, ratio=1.0, random_state=42):
+def downsample_classes(df, ratio=1.0, random_state=42):
     pos = df[df['label'] == 1]
     neg = df[df['label'] == 0]
     n_neg = int(len(pos) * ratio)
     neg_down = neg.sample(n=min(n_neg, len(neg)), random_state=random_state)
     return pd.concat([pos, neg_down]).sample(frac=1, random_state=random_state).reset_index(drop=True)
 
+def upsample_classes(df, ratio=1.0, random_state=42):
+    pos = df[df['label'] == 1]
+    neg = df[df['label'] == 0]
+    n_pos = int(len(neg) * ratio)
+    pos_up = pos.sample(n=n_pos, replace=True, random_state=random_state)
+    return pd.concat([pos_up, neg]).sample(frac=1, random_state=random_state).reset_index(drop=True)
+
 def handle_class_imbalance(df, method='weighted', ratio=1.0, random_state=42):
     if method == 'weighted':
         return df, compute_class_weights(df, 2)
     elif method == 'downsample':
-        balanced_df = balance_classes(df, ratio, random_state)
+        balanced_df = downsample_classes(df, ratio, random_state)
+        return balanced_df, None
+    elif method == 'upsample':
+        balanced_df = upsample_classes(df, ratio, random_state)
         return balanced_df, None
     else:
-        raise ValueError("Method must be 'weighted' or 'downsample'")
+        raise ValueError("Method must be 'weighted', 'downsample', or 'upsample'")
 
 def add_special_tokens(tokenizer):
     special_tokens = {'additional_special_tokens': ["[E1]", "[/E1]", "[E2]", "[/E2]"]}
