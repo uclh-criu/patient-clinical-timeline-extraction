@@ -1,6 +1,7 @@
 import json
 import re
 import os
+from openai import OpenAI
 
 def load_prompt_template(prompt_path):
     with open(prompt_path, "r", encoding="utf-8") as f:
@@ -39,6 +40,17 @@ def llm_extraction(prompt, generator, max_new_tokens=5):
     """
     outputs = generator(prompt, max_new_tokens=max_new_tokens, do_sample=False)
     return outputs[0]['generated_text']
+
+def llm_extraction_openai(prompt, model):
+    client = OpenAI()
+    
+    response = client.responses.create(
+        model=model,
+        input=prompt,
+        temperature=0
+    )
+    
+    return response.output_text.strip()
 
 def parse_llm_answer(full_response):
     """
