@@ -1,6 +1,8 @@
 import json
 import re
 import os
+from pydantic import BaseModel
+from typing import List
 from openai import OpenAI
 
 def load_prompt_template(prompt_path):
@@ -34,14 +36,17 @@ def make_binary_prompt(entity, date, note_text, prompt_filename):
     )
     return prompt
 
-def llm_extraction(prompt, generator, max_new_tokens=5):
+def llm_extraction_binary_hf(prompt, generator, max_new_tokens=5):
     """
-    Call the LLM with a binary prompt and return the full response.
+    Call HuggingFace model with a binary prompt and return the full response.
     """
     outputs = generator(prompt, max_new_tokens=max_new_tokens, do_sample=False)
     return outputs[0]['generated_text']
 
-def llm_extraction_openai(prompt, model):
+def llm_extraction_binary_openai(prompt, model):
+    """
+    Call OpenAI model with a binary prompt and return the full response.
+    """
     client = OpenAI()
     
     response = client.responses.create(
@@ -86,6 +91,27 @@ def make_multi_prompt(note_text, prompt_filename, entities_list=None, dates=None
     
     return prompt
 
+def llm_extraction_multi_hf(prompt, generator, max_new_tokens=1000):
+    """
+    Call HuggingFace model to extract all entity-date relationships at once.
+    Returns JSON array of relationships.
+    """
+    outputs = generator(prompt, max_new_tokens=max_new_tokens, do_sample=False)
+    raw_text = outputs[0]['generated_text']
+    
+    # Clean the response - remove markdown code block if present
+    if raw_text.startswith('```'):
+        # Remove first line (```json) and last line (```)
+        raw_text = '\n'.join(raw_text.split('\n')[1:-1])
+    
+    # Parse the response as JSON
+    try:
+        relationships = json.loads(raw_text)
+        return relationships
+    except json.JSONDecodeError as e:
+        print(f"Warning: Could not parse LLM response as JSON. Error: {str(e)}")
+        return []
+
 def llm_extraction_multi_openai(prompt, model):
     """
     Call OpenAI to extract all entity-date relationships at once.
@@ -95,8 +121,7 @@ def llm_extraction_multi_openai(prompt, model):
     
     response = client.responses.create(
         model=model,
-        input=prompt,
-        temperature=0
+        input=prompt
     )
     
     # Clean the response - remove markdown code block if present
@@ -112,3 +137,37 @@ def llm_extraction_multi_openai(prompt, model):
     except json.JSONDecodeError as e:
         print(f"Warning: Could not parse LLM response as JSON. Error: {str(e)}")
         return []
+
+class EntityDateRelation(BaseModel):
+    date: str
+    entity_label: str
+    date_id: int
+    entity_id: int
+
+class RelationshipExtraction(BaseModel):
+    relationships: List[EntityDateRelation]
+
+def llm_extraction_multi_structured_openai(prompt, model):
+    """
+    Call OpenAI to extract all entity-date relationships at once using structured output.
+    Returns a list of relationships using Pydantic models for validation.
+    """
+    client = OpenAI()
+    
+    response = client.responses.parse(
+        model=model,
+        input=[
+            {"role": "system", "content": prompt}
+        ],
+        text_format=RelationshipExtraction
+    )
+    
+    return response.output_parsed.relationships
+
+def llm_extraction_multi_structured_hf(prompt, generator):
+    """
+    Call HuggingFace model to extract all entity-date relationships at once using structured output.
+    Returns a list of relationships using Pydantic models for validation.
+    To be implemented based on further instructions.
+    """
+    raise NotImplementedError("HuggingFace structured output implementation pending further instructions.")
