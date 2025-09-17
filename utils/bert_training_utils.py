@@ -1,7 +1,7 @@
 import pandas as pd
 import torch
 from collections import Counter
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, confusion_matrix
 import numpy as np
 from bert_extractor_utils import preprocess_input
 
@@ -105,9 +105,33 @@ def tokenize_function(example, tokenizer, max_length=256):
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
-    return {
+    
+    # Overall metrics
+    metrics = {
         "accuracy": accuracy_score(labels, preds),
         "f1_macro": f1_score(labels, preds, average="macro", zero_division=0),
         "f1_micro": f1_score(labels, preds, average="micro", zero_division=0),
         "f1_weighted": f1_score(labels, preds, average="weighted", zero_division=0),
     }
+    
+    # Per-class metrics (focusing on positive class)
+    pos_precision = precision_score(labels, preds, pos_label=1, zero_division=0)
+    pos_recall = recall_score(labels, preds, pos_label=1, zero_division=0)
+    pos_f1 = f1_score(labels, preds, pos_label=1, zero_division=0)
+    
+    metrics.update({
+        "positive_precision": pos_precision,
+        "positive_recall": pos_recall,
+        "positive_f1": pos_f1
+    })
+    
+    # Confusion matrix stats
+    tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
+    metrics.update({
+        "true_negatives": int(tn),
+        "false_positives": int(fp),
+        "false_negatives": int(fn),
+        "true_positives": int(tp)
+    })
+    
+    return metrics
