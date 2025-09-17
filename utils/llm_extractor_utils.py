@@ -63,3 +63,52 @@ def parse_llm_answer(full_response):
         return 0, 0.0
     else:
         return 0, 0.5  # Unsure or anything else
+
+def make_multi_prompt(note_text, prompt_filename, entities_list=None, dates=None):
+    """
+    Create a prompt for extracting all entity-date relationships from a note.
+    """
+    utils_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(utils_dir, ".."))
+    prompt_dir = os.path.join(project_root, "prompts")
+    prompt_path = os.path.join(prompt_dir, prompt_filename)
+    prompt_template = load_prompt_template(prompt_path)
+    
+    # Format entities and dates if provided
+    entities_str = "\n".join([f"- {e['value']} (ID: {e['id']})" for e in entities_list]) if entities_list else "Extract all relevant medical conditions/findings"
+    dates_str = "\n".join([f"- {d['value']} (ID: {d['id']})" for d in dates]) if dates else "Extract all relevant dates"
+    
+    prompt = prompt_template.format(
+        note_text=note_text,
+        entities=entities_str,
+        dates=dates_str
+    )
+    
+    return prompt
+
+def llm_extraction_multi_openai(prompt, model):
+    """
+    Call OpenAI to extract all entity-date relationships at once.
+    Returns JSON array of relationships.
+    """
+    client = OpenAI()
+    
+    response = client.responses.create(
+        model=model,
+        input=prompt,
+        temperature=0
+    )
+    
+    # Clean the response - remove markdown code block if present
+    raw_text = response.output_text.strip()
+    if raw_text.startswith('```'):
+        # Remove first line (```json) and last line (```)
+        raw_text = '\n'.join(raw_text.split('\n')[1:-1])
+    
+    # Parse the response as JSON
+    try:
+        relationships = json.loads(raw_text)
+        return relationships
+    except json.JSONDecodeError as e:
+        print(f"Warning: Could not parse LLM response as JSON. Error: {str(e)}")
+        return []
