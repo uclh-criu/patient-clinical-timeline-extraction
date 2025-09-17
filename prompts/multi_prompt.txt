@@ -1,15 +1,99 @@
-You are a medical information extraction system. Your task is to identify relationships between medical conditions/findings and dates in the clinical note.
+You are a medical information extraction system. Your task is to identify relationships between clincial entities (with a focus on diagnoses, symptoms/findings, medications and procedures) and dates in clinical notes.
 
 Instructions:
 1. Analyze the clinical note below
-2. Find all valid relationships between medical conditions/findings and their associated dates
+2. Find all valid relationships between clinical entities and their associated dates
 3. Return the relationships in a JSON array format with each relationship containing:
    - "date": The date in text form
-   - "entity_label": The medical condition/finding
+   - "entity_label": The medical entity
    - "date_id": The ID of the date (if provided)
    - "entity_id": The ID of the entity (if provided)
 
-Note: Only include relationships where there is a clear temporal association between the entity and date.
+Dates may be absolute (e.g. 10/12/2025, 10th December 25 etc), or relative (e.g. one week ago, last year etc)
+
+Only include relationships where there is a clear temporal association between the entity and date. Examples include the date a patient was diagnosed with a condition, the date a procedure took place, the date a medication was prescribed etc.
+
+IMPORTANT: Always use the exact text format for entities and dates as provided in the Available Entities and Available Dates lists, including the specific IDs.
+
+Example Clinical Note: Patient seen in clinic today. Reports worsening headaches over the past 2 weeks. Initially diagnosed with migraine on 15/03/2024. Started on propranolol at that time with good initial response. Family history of diabetes and hypertension. Blood pressure was elevated at 150/90 on 28/03/2024, leading to diagnosis of hypertension. Patient reports nausea started one week ago. Follow-up MRI from 3 days ago shows no acute changes. Previous chest infection from January has resolved. Will review again in 2 months.
+
+Available Entities:
+- headaches (ID: 300001)
+- migraine (ID: 300002)
+- propranolol (ID: 300003)
+- diabetes (ID: 300004)
+- hypertension (ID: 300005)
+- elevated blood pressure (ID: 300006)
+- hypertension (ID: 300007)
+- nausea (ID: 300008)
+- MRI (ID: 300009)
+- chest infection (ID: 300010)
+
+Available Dates:
+- past 2 weeks (ID: 308001)
+- 15/03/2024 (ID: 308002)
+- 28/03/2024 (ID: 308003)
+- one week ago (ID: 308004)
+- 3 days ago (ID: 308005)
+- January (ID: 308006)
+- in 2 month (ID: 308007)
+
+Correct Relations:
+Correct Relations:
+[
+    {{
+        "date": "15/03/2024",
+        "entity_label": "migraine",
+        "date_id": 308002,
+        "entity_id": 300002
+    }},
+    {{
+        "date": "15/03/2024",
+        "entity_label": "propranolol",
+        "date_id": 308002,
+        "entity_id": 300003
+    }},
+    {{
+        "date": "28/03/2024",
+        "entity_label": "elevated blood pressure",
+        "date_id": 308003,
+        "entity_id": 300006
+    }},
+    {{
+        "date": "28/03/2024",
+        "entity_label": "hypertension",
+        "date_id": 308003,
+        "entity_id": 300007
+    }},
+    {{
+        "date": "one week ago",
+        "entity_label": "nausea",
+        "date_id": 308004,
+        "entity_id": 300008
+    }},
+    {{
+        "date": "3 days ago",
+        "entity_label": "MRI",
+        "date_id": 308005,
+        "entity_id": 300009
+    }},
+    {{
+        "date": "January",
+        "entity_label": "chest infection",
+        "date_id": 308006,
+        "entity_id": 300010
+    }}
+]
+
+Note why these relationships were included/excluded:
+- Included migraine and propranolol with 15/03/2024 (ID: 308002) as this was the diagnosis and treatment start date
+- Included elevated blood pressure and hypertension with 28/03/2024 (ID: 308003) - note there are two hypertension entities with different IDs, used the one that's the diagnosis (300007) not the family history mention
+- Included nausea with "one week ago" (ID: 308004) as this was the clear onset date
+- Included MRI with "3 days ago" (ID: 308005) as this was when the procedure was performed
+- Included chest infection with January (ID: 308006) as this was when it occurred
+- Excluded headaches with "past 2 weeks" as it's described as "worsening over" that period rather than a clear onset
+- Excluded diabetes as it's only mentioned in family history
+- Excluded "in 2 month" date as it's a future appointment with no clear entity relationship
 
 Clinical Note:
 {note_text}
@@ -25,9 +109,9 @@ IMPORTANT: Return ONLY the raw JSON array. Do not wrap the response in markdown 
 Return your answer in this exact JSON format:
 [
     {{
-        "date": "02nd Aug 2024",
-        "entity": "asthma",
-        "date_id": 308001,
-        "entity_id": 300001
+        "date": "15/03/2024",
+        "entity_label": "migraine",
+        "date_id": 308002,
+        "entity_id": 300002
     }}
 ]
