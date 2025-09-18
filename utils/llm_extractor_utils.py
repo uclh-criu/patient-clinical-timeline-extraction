@@ -150,7 +150,7 @@ class RelationshipExtraction(BaseModel):
 def llm_extraction_multi_structured_openai(prompt, model):
     """
     Call OpenAI to extract all entity-date relationships at once using structured output.
-    Returns a list of relationships using Pydantic models for validation.
+    Returns a list of dictionaries containing the relationships.
     """
     client = OpenAI()
     
@@ -162,12 +162,41 @@ def llm_extraction_multi_structured_openai(prompt, model):
         text_format=RelationshipExtraction
     )
     
-    return response.output_parsed.relationships
+    # Convert Pydantic objects to dictionaries
+    return [rel.model_dump() for rel in response.output_parsed.relationships]
 
 def llm_extraction_multi_structured_hf(prompt, generator):
     """
     Call HuggingFace model to extract all entity-date relationships at once using structured output.
     Returns a list of relationships using Pydantic models for validation.
-    To be implemented based on further instructions.
     """
-    raise NotImplementedError("HuggingFace structured output implementation pending further instructions.")
+    # Convert our Pydantic model to a JSON Schema
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "RelationshipExtraction",
+            "schema": RelationshipExtraction.model_json_schema(),
+            "strict": True,
+        },
+    }
+
+    # Format messages for chat completion
+    messages = [
+        {
+            "role": "system",
+            "content": prompt
+        }
+    ]
+
+    # Generate structured output
+    response = generator.chat_completion(
+        messages=messages,
+        response_format=response_format,
+    )
+
+    # Parse the response into our Pydantic model
+    structured_data = response.choices[0].message.content
+    relationships = RelationshipExtraction.model_validate_json(structured_data)
+    
+    # Convert Pydantic objects to dictionaries for compatibility with calculate_metrics
+    return [rel.model_dump() for rel in relationships.relationships]
