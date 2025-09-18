@@ -39,7 +39,6 @@ Available Dates:
 - in 2 month (ID: 308007)
 
 Correct Relations:
-Correct Relations:
 [
     {{
         "date": "15/03/2024",

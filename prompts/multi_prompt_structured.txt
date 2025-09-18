@@ -37,52 +37,52 @@ Available Dates:
 - in 2 month (ID: 308007)
 
 Example Output:
-{
+{{
     "relationships": [
-        {
+        {{
             "date": "15/03/2024",
             "entity_label": "migraine",
             "date_id": 308002,
             "entity_id": 300002
-        },
-        {
+        }},
+        {{
             "date": "15/03/2024",
             "entity_label": "propranolol",
             "date_id": 308002,
             "entity_id": 300003
-        },
-        {
+        }},
+        {{
             "date": "28/03/2024",
             "entity_label": "elevated blood pressure",
             "date_id": 308003,
             "entity_id": 300006
-        },
-        {
+        }},
+        {{
             "date": "28/03/2024",
             "entity_label": "hypertension",
             "date_id": 308003,
             "entity_id": 300007
-        },
-        {
+        }},
+        {{
             "date": "one week ago",
             "entity_label": "nausea",
             "date_id": 308004,
             "entity_id": 300008
-        },
-        {
+        }},
+        {{
             "date": "3 days ago",
             "entity_label": "MRI",
             "date_id": 308005,
             "entity_id": 300009
-        },
-        {
+        }},
+        {{
             "date": "January",
             "entity_label": "chest infection",
             "date_id": 308006,
             "entity_id": 300010
-        }
+        }}
     ]
-}
+}}
 
 Note why these relationships were included/excluded:
 - Included migraine and propranolol with 15/03/2024 (ID: 308002) as this was the diagnosis and treatment start date
