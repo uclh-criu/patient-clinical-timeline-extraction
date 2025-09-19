@@ -11,3 +11,4 @@ notebooks/bert_rc_results/
 *.csv
 *.json
 *.tsv
+*.xlsx
