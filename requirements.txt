@@ -12,3 +12,5 @@ medcat==1.16.0
 python-dotenv
 ipykernel
 datefinder
+pydantic
+bitsandbytes
