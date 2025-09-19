@@ -108,27 +108,14 @@ def llm_extraction_multi_hf(prompt, generator, max_new_tokens=1000):
     )
     print("Generation complete")  # Debug print
     
-    raw_text = outputs[0]['generated_text'] if outputs else ""
-    
-    print("\nRaw LLM Response:")
-    print(raw_text)
-    print("\nLength of response:", len(raw_text))
-    print("\n---\n")
-    
-    if not raw_text:
-        print("Warning: Model generated empty response")
-        return []
-    
     # Clean the response
-    # Remove the prompt from the response
+    raw_text = outputs[0]['generated_text']
+    
+    # Remove the prompt if present
     if prompt in raw_text:
         raw_text = raw_text[len(prompt):].strip()
     
-    # Remove any markdown code block formatting
-    if raw_text.startswith('```'):
-        raw_text = '\n'.join(raw_text.split('\n')[1:-1])
-    
-    # Try to find JSON array by looking for first '[' and last ']'
+    # Just grab what's inside the outermost [ ]
     try:
         start_idx = raw_text.find('[')
         end_idx = raw_text.rfind(']')
@@ -143,7 +130,7 @@ def llm_extraction_multi_hf(prompt, generator, max_new_tokens=1000):
         return relationships
     except json.JSONDecodeError as e:
         print(f"Warning: Could not parse LLM response as JSON. Error: {str(e)}")
-        print("Cleaned text that failed to parse:")
+        print("Raw text:")
         print(raw_text)
         return []
 
