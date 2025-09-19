@@ -96,13 +96,46 @@ def llm_extraction_multi_hf(prompt, generator, max_new_tokens=1000):
     Call HuggingFace model to extract all entity-date relationships at once.
     Returns JSON array of relationships.
     """
-    outputs = generator(prompt, max_new_tokens=max_new_tokens, do_sample=False)
-    raw_text = outputs[0]['generated_text']
+    print("Generating response...")  # Debug print
+    outputs = generator(
+        prompt,
+        max_new_tokens=max_new_tokens,
+        do_sample=False,
+        num_return_sequences=1,
+        return_full_text=False,
+        pad_token_id=2,
+        eos_token_id=2
+    )
+    print("Generation complete")  # Debug print
     
-    # Clean the response - remove markdown code block if present
+    raw_text = outputs[0]['generated_text'] if outputs else ""
+    
+    print("\nRaw LLM Response:")
+    print(raw_text)
+    print("\nLength of response:", len(raw_text))
+    print("\n---\n")
+    
+    if not raw_text:
+        print("Warning: Model generated empty response")
+        return []
+    
+    # Clean the response
+    # Remove the prompt from the response
+    if prompt in raw_text:
+        raw_text = raw_text[len(prompt):].strip()
+    
+    # Remove any markdown code block formatting
     if raw_text.startswith('```'):
-        # Remove first line (```json) and last line (```)
         raw_text = '\n'.join(raw_text.split('\n')[1:-1])
+    
+    # Try to find JSON array by looking for first '[' and last ']'
+    try:
+        start_idx = raw_text.find('[')
+        end_idx = raw_text.rfind(']')
+        if start_idx != -1 and end_idx != -1:
+            raw_text = raw_text[start_idx:end_idx + 1]
+    except:
+        pass
     
     # Parse the response as JSON
     try:
@@ -110,6 +143,8 @@ def llm_extraction_multi_hf(prompt, generator, max_new_tokens=1000):
         return relationships
     except json.JSONDecodeError as e:
         print(f"Warning: Could not parse LLM response as JSON. Error: {str(e)}")
+        print("Cleaned text that failed to parse:")
+        print(raw_text)
         return []
 
 def llm_extraction_multi_openai(prompt, model):
