@@ -143,7 +143,8 @@ def llm_extraction_multi_openai(prompt, model):
     
     response = client.responses.create(
         model=model,
-        input=prompt
+        input=prompt,
+        reasoning={"effort": "high"}
     )
     
     # Clean the response - remove markdown code block if present
