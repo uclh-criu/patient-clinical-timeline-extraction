@@ -55,6 +55,15 @@ def create_interactive_patient_timeline(timeline_df, patient_id):
     if patient_df.empty:
         print(f"No valid dates found for patient {patient_id}")
         return None
+    
+    # Calculate summary information
+    unique_entities = patient_df['entity_preferred_name'].unique()
+    total_entities = len(patient_df)  # Total number of entities/events
+    date_range_start = patient_df['standardized_date'].min().strftime('%Y-%m-%d')
+    date_range_end = patient_df['standardized_date'].max().strftime('%Y-%m-%d')
+    
+    # Calculate height based on number of unique entities (for spacing)
+    height = max(600, len(unique_entities) * 30)  # minimum 600px, 30px per unique entity
         
     fig = go.Figure(data=[
         go.Scatter(
@@ -71,11 +80,22 @@ def create_interactive_patient_timeline(timeline_df, patient_id):
     ])
     
     fig.update_layout(
-        title=f"Clinical Timeline for Patient {patient_id}",
+        title=f"Clinical Timeline for Patient {patient_id}<br><sup>Date Range: {date_range_start} to {date_range_end} | {total_entities} Clinical Entities</sup>",
         xaxis_title="Date",
         yaxis_title="Clinical Events",
+        height=height,
+        width=1000,
         yaxis=dict(
-            autorange="reversed"
+            autorange="reversed",
+            tickmode='array',
+            ticktext=sorted(unique_entities),
+            tickvals=sorted(unique_entities)
+        ),
+        margin=dict(
+            l=200,  # Left margin for labels
+            r=20,
+            t=80,  # Increased top margin to move title outside
+            b=50
         )
     )
     
@@ -124,7 +144,7 @@ def get_patient_timeline_summary(timeline_df, patient_id):
     # Create the timeline summary
     timeline_summary = {
         'patient_id': patient_id,
-        'total_events': len(patient_df),
+        'total_entities': len(patient_df),
         'date_range': {
             'start': patient_df['standardized_date'].min().strftime('%Y-%m-%d'),
             'end': patient_df['standardized_date'].max().strftime('%Y-%m-%d')
