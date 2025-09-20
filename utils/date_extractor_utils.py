@@ -7,7 +7,7 @@ import datefinder
 
 def extract_absolute_dates(text: str) -> List[Dict[str, Any]]:
     """
-    Extract absolute dates from text using datefinder.
+    Extract absolute dates from text using datefinder while filtering out single decimal numbers.
     
     Args:
         text: Clinical note text
@@ -20,18 +20,23 @@ def extract_absolute_dates(text: str) -> List[Dict[str, Any]]:
     
     absolute_dates = []
     
+    # Regular expression to match single decimal numbers (e.g., 4.2, 3.1) or single integers (e.g., 140, 250)
+    pattern_to_exclude = r'^\d+(\.\d+)?$'
+    
     for date_obj, source_str, indices in datefinder.find_dates(
         text, 
         source=True, 
         index=True, 
         strict=False
     ):
-        absolute_dates.append({
-            'id': f"abs_{len(absolute_dates) + 1}",
-            'value': source_str,
-            'start': indices[0],
-            'end': indices[1]
-        })
+        # Skip if the source string is a single decimal number or single integer
+        if not re.match(pattern_to_exclude, source_str.strip()):
+            absolute_dates.append({
+                'id': f"abs_{len(absolute_dates) + 1}",
+                'value': source_str,
+                'start': indices[0],
+                'end': indices[1]
+            })
     
     return absolute_dates
 
