@@ -141,11 +141,17 @@ def llm_extraction_multi_openai(prompt, model):
     """
     client = OpenAI()
     
-    response = client.responses.create(
-        model=model,
-        input=prompt,
-        reasoning={"effort": "high"}
-    )
+    # Base parameters for the API call
+    params = {
+        "model": model,
+        "input": prompt
+    }
+    
+    # Add reasoning parameter only for specific models
+    if model == 'gpt-5-mini':
+        params["reasoning"] = {"effort": "high"}
+    
+    response = client.responses.create(**params)
     
     # Clean the response - remove markdown code block if present
     raw_text = response.output_text.strip()
