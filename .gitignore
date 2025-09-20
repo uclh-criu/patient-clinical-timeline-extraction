@@ -5,6 +5,7 @@ Llama-3.2-3B-Instruct/
 models/relcat_models/
 models/bert_models/
 models/medmen_wstatus_2021_oct/
+models/PubmedBERTbase-MimicSmall-EntityBERT
 notebooks/bert_rc_results/
 
 # Ignore all data files
