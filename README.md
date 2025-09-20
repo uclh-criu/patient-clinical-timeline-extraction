@@ -6,8 +6,8 @@ You can choose between four different methods for relation extraction between cl
 
 These are:
 1. **Naive model** which finds the nearest date within a maximum distance of characters for each clinical entity
-2. **Finetuned BERT model** for binary relation classification between dates and clinical entities with span pooling to focus on entity representations 
-3. **LLM** approach with few-shot prompting, either for binary relation classification or multi-relation extraction
+2. **Finetuned BERT model** for binary relation classification between dates and clinical entities with span pooling to focus on entity representations, designed to work with any BERT model from HuggingFace
+3. **LLM** approach with few-shot prompting, either for binary relation classification or multi-relation extraction, designed to work with any text generation model from HuggingFace and/or any OpenAI API model
 4. **[RelCAT](https://arxiv.org/abs/2501.16077)**, a module of the [MedCAT](https://arxiv.org/abs/2010.01165) framework, specifically designed for relation extraction between entities in clinical text
 
 The repository provides utility functions for these extraction methods, as well as customisable notebooks for training, evaluation and inference.
@@ -17,9 +17,13 @@ The repository provides utility functions for these extraction methods, as well 
 ### Get Started
 
 1. Clone the repo
-3. Create a virtual environment and install dependencies:
+2. Create a virtual environment and install dependencies:
    ```bash
    pip install -r requirements.txt
+   ```
+3. If you plan to use OpenAI LLMs then create a .env file in the root folder with the following:
+   ```bash
+   OPENAI_API_KEY = 'your_key_here'
    ```
 
 ### Data Format
