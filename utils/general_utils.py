@@ -62,6 +62,7 @@ def get_entity_date_pairs(entities_list, dates, relative_dates=None):
                 'entity': entity,
                 'date_info': date_info,
                 'entity_label': entity['value'],
+                'entity_preferred_name': entity.get('preferred_name', entity['value']),
                 'date': date_info['value'],
                 'distance': abs(entity['start'] - date_info['start']),
                 'date_type': 'absolute'
@@ -75,6 +76,7 @@ def get_entity_date_pairs(entities_list, dates, relative_dates=None):
                     'entity': entity,
                     'date_info': rel_date,
                     'entity_label': entity['value'],
+                    'entity_preferred_name': entity.get('preferred_name', entity['value']),
                     'date': rel_date['value'],
                     'distance': abs(entity['start'] - rel_date['start']),
                     'date_type': 'relative'
