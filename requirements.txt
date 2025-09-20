@@ -14,3 +14,5 @@ ipykernel
 datefinder
 pydantic
 bitsandbytes
+plotly
+nbformat
