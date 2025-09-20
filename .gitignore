@@ -8,6 +8,7 @@ models/medmen_wstatus_2021_oct/
 models/20230227__kch_gstt_trained_model_494c3717f637bb89/
 models/PubmedBERTbase-MimicSmall-EntityBERT/
 notebooks/bert_rc_results/
+outputs/
 
 # Ignore all data files
 *.csv
