@@ -46,7 +46,7 @@ def bert_extraction(note_text, entity, date, model, tokenizer):
     input_text = processed['marked_text']
     inputs = tokenizer(input_text, return_tensors="pt", truncation=True, padding=True, max_length=256)
     outputs = model(**inputs)
-    logits = outputs.logits
+    logits = outputs['logits']
     prediction = logits.argmax().item()
     confidence = logits.softmax(dim=1).max().item()
     return prediction, confidence
