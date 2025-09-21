@@ -81,13 +81,14 @@ class BertRC(nn.Module):
         e_emb = torch.where(has_tokens, span_mean, open_emb)
         return e_emb
 
-    def forward(self, input_ids, attention_mask=None, labels=None):
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None, labels=None):
         """
         Forward pass of the model.
         
         Args:
             input_ids: Token IDs with entity markers [E1]...[/E1] and [E2]...[/E2]
             attention_mask: Attention mask for the input
+            token_type_ids: Segment ids (not used in this model)
             labels: Optional labels for training
             
         Returns:
