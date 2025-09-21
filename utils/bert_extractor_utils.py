@@ -10,7 +10,7 @@ def mark_entities_full_text(text, entity_start, entity_end, date_start, date_end
         ],
         reverse=True
     ):
-        marked = marked[:span] + f"{token1} {ent_text} {token2}" + marked[span_end:]
+        marked = marked[:span] + f"{token1}{ent_text}{token2}" + marked[span_end:]
     
     return marked
 
