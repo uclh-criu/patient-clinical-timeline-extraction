@@ -12,7 +12,7 @@ def build_gold_lookup(gold_relations):
 def get_label_for_pair(entity_value, date_value, gold_set):
     return "relation" if (entity_value, date_value) in gold_set else "no_relation"
 
-def create_training_pairs(samples, max_length=256):
+def create_training_pairs(samples, max_length=384):
     all_samples = []
     
     for sample in samples:
@@ -100,7 +100,7 @@ def add_special_tokens(tokenizer):
     tokenizer.add_special_tokens(special_tokens)
     return tokenizer
 
-def tokenize_function(example, tokenizer, max_length=256):
+def tokenize_function(example, tokenizer, max_length=384):
     return tokenizer(example["marked_text"], truncation=True, padding="max_length", max_length=max_length)
 
 def run_sweep(model_init, training_args, param_grid, train_dataset, val_dataset, test_dataset, compute_metrics):

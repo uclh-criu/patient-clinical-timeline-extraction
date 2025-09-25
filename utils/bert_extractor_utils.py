@@ -44,7 +44,7 @@ def preprocess_input(note_text, entity, date):
 def bert_extraction(note_text, entity, date, model, tokenizer):
     processed = preprocess_input(note_text, entity, date)
     input_text = processed['marked_text']
-    inputs = tokenizer(input_text, return_tensors="pt", truncation=True, padding=True, max_length=256)
+    inputs = tokenizer(input_text, return_tensors="pt", truncation=True, padding=True, max_length=384)
     outputs = model(**inputs)
     logits = outputs['logits']
     prediction = logits.argmax().item()
