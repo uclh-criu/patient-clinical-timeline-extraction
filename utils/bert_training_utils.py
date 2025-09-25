@@ -4,6 +4,7 @@ from collections import Counter
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, confusion_matrix
 import numpy as np
 from bert_extractor_utils import preprocess_input
+from transformers import TrainingArguments, Trainer
 
 def build_gold_lookup(gold_relations):
     return set((g["entity"], g["date"]) for g in gold_relations)
@@ -101,6 +102,58 @@ def add_special_tokens(tokenizer):
 
 def tokenize_function(example, tokenizer, max_length=256):
     return tokenizer(example["marked_text"], truncation=True, padding="max_length", max_length=max_length)
+
+def run_sweep(model_init, training_args, param_grid, train_dataset, val_dataset, test_dataset, compute_metrics):
+    """
+    Runs hyperparameter sweep and collects results in a DataFrame.
+    """
+    results = []
+
+    for i, params in enumerate(param_grid):
+        args = TrainingArguments(
+            output_dir=training_args.output_dir,
+            eval_strategy=training_args.eval_strategy,
+            save_strategy=training_args.save_strategy,
+            load_best_model_at_end=True,
+            logging_strategy=training_args.logging_strategy,
+            logging_steps=training_args.logging_steps,
+            metric_for_best_model=training_args.metric_for_best_model,
+            greater_is_better=training_args.greater_is_better,
+            num_train_epochs=params["epochs"],
+            learning_rate=params["learning_rate"],
+            per_device_train_batch_size=params["batch_size"],
+            per_device_eval_batch_size=training_args.per_device_eval_batch_size,
+            warmup_ratio=training_args.warmup_ratio,
+            weight_decay=training_args.weight_decay,
+            fp16=training_args.fp16,
+            report_to=training_args.report_to,
+            seed=training_args.seed,
+        )
+
+        trainer = Trainer(
+            model=model_init(),
+            args=args,
+            train_dataset=train_dataset,
+            eval_dataset=val_dataset,
+            compute_metrics=compute_metrics,
+        )
+
+        trainer.train()
+        eval_results = trainer.evaluate(test_dataset)
+
+        row = {
+            "run": i,
+            "batch_size": params["batch_size"],
+            "learning_rate": params["learning_rate"],
+            "epochs": params["epochs"],
+            **eval_results
+        }
+        results.append(row)
+
+    df = pd.DataFrame(results)
+    best_idx = df["eval_positive_f1"].idxmax()
+    df.loc[best_idx, "best"] = True
+    return df
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
