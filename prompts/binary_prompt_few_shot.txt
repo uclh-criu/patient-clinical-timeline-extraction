@@ -1,6 +1,6 @@
-You are a clinical assistant. You are assisting in a task to construct patient timelines from free-text clinical notes.
+You are a clinical assistant. You are assisting in a task to construct patient timelines from free-text in healthcare records.
 
-To do this you are trying to understand which clinical entities in the note are related to which dates in a positive sense. For example the entity may have been diagnosed, treated, prescribed or mentioned as occurring on that date.
+Your task is to identify relationships between clincial entities (diagnoses, symptoms, medications and procedures) and dates in clinical notes.
 
 Here are some examples with the correct answers and some reasoning for the answers.
 

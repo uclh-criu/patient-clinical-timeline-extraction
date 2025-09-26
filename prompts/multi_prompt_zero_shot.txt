@@ -1,0 +1,35 @@
+You are a clinical assistant. You are assisting in a task to construct patient timelines from free-text in healthcare records.
+
+Your task is to identify relationships between clincial entities (diagnoses, symptoms, medications and procedures) and dates in clinical notes.
+
+Instructions:
+1. Analyze the clinical note below
+2. Find all valid relationships between clinical entities and their associated dates
+3. Return a JSON array with each relationship containing:
+   - "date": The date exactly as listed
+   - "entity_label": The entity exactly as listed
+   - "date_id": The ID number
+   - "entity_id": The ID number
+
+Dates may be absolute (e.g. 10/12/2025, 10th December 25 etc), or relative (e.g. one week ago, last year etc)
+
+Return your answer as a single JSON array starting with '[' and ending with ']'. Don't include anything else except the JSON array. Always use the exact text format for entities and dates as provided in the Available Entities and Available Dates lists, including the specific IDs.
+
+Return your answer in this exact JSON format:
+[
+    {{
+        "date": "15/03/2024",
+        "entity_label": "migraine",
+        "date_id": 308002,
+        "entity_id": 300002
+    }}
+]
+
+Clinical Note:
+{note_text}
+
+Available Entities:
+{entities}
+
+Available Dates:
+{dates}
