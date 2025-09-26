@@ -59,7 +59,7 @@ def llm_extraction_binary_openai(prompt, model):
 
 def parse_llm_answer(full_response):
     """
-    Extract the answer (Yes/No/Unsure) from the model's response.
+    Extract the answer (Yes/No) from the model's response.
     """
     response = full_response.strip().lower()
     if "yes" in response:
@@ -67,7 +67,7 @@ def parse_llm_answer(full_response):
     elif "no" in response:
         return 0, 0.0
     else:
-        return 0, 0.5  # Unsure or anything else
+        return 0, 0.0  # Assume no if anything else returned
 
 def make_multi_prompt(note_text, prompt_filename, entities_list=None, dates=None):
     """
