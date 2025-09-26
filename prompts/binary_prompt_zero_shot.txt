@@ -4,4 +4,4 @@ Your task is to identify relationships between clincial entities (diagnoses, sym
 
 For the following clinical note, determine if the entity and date are directly and positively linked. 
 
-Respond with exactly one word: Yes, No, or Unsure.
+Respond with exactly one word: Yes or No.
