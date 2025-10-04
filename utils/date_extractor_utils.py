@@ -3,284 +3,285 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import json
-import datefinder
+from dateparser.search import search_dates
 
-def extract_absolute_dates(text: str) -> List[Dict[str, Any]]:
+def clean_value(v: str) -> str:
+    """General cleaning wrapper for both absolute and relative comparisons."""
+    if not isinstance(v, str):
+        return ""
+    v = v.lower().strip()
+    v = re.sub(r'\s+', ' ', v)
+    v = re.sub(r'[^a-z0-9\s]', '', v)
+    return v.strip()
+
+def extract_absolute_dates(text: str):
     """
-    Extract absolute dates from text using datefinder while filtering out single decimal numbers.
-    
-    Args:
-        text: Clinical note text
-        
-    Returns:
-        List of absolute date dictionaries with original text and positions
+    Extract cleaner absolute dates using dateparser.
+    Returns date strings and positions.
     """
     if not text:
         return []
-    
+
     absolute_dates = []
-    
-    # Regular expression to match single decimal numbers (e.g., 4.2, 3.1) or single integers (e.g., 140, 250)
-    pattern_to_exclude = r'^\d+(\.\d+)?$'
-    
-    for date_obj, source_str, indices in datefinder.find_dates(
-        text, 
-        source=True, 
-        index=True, 
-        strict=False
-    ):
-        # Skip if the source string is a single decimal number or single integer
-        if not re.match(pattern_to_exclude, source_str.strip()):
+    # Regex to find plausible date substrings first (filters out noise)
+    date_pattern = r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\b'
+    matches = list(re.finditer(date_pattern, text, re.IGNORECASE))
+
+    for m in matches:
+        substring = m.group(0)
+        parsed = search_dates(substring)
+        # Keep only if it's truly parseable as a date
+        if parsed:
             absolute_dates.append({
                 'id': f"abs_{len(absolute_dates) + 1}",
-                'value': source_str,
-                'start': indices[0],
-                'end': indices[1]
+                'value': substring.strip(),
+                'start': m.start(),
+                'end': m.end()
             })
-    
+
     return absolute_dates
 
-# Patterns where we can confidently calculate dates
+#Relative date regex patterns
 RELATIVE_DATE_PATTERNS = [
-    # Time-based patterns (last/this/next + time unit)
+    # --- Simple temporal keywords ---
+    (r'\b(today|yesterday|tomorrow|currently|now|presently)\b', 'common'),
+    (r'\b(this|last|next)\s+(morning|evening|night)\b', 'part_of_day'),
+
+    # --- Standard relative time phrases ---
     (r'\b(last|this|next)\s+(week|month|year|day)\b', 'time_unit'),
     (r'\b(last|this|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', 'day_of_week'),
-    
-    # Numeric + time unit patterns
-    (r'\b(\d+)\s+(days?|weeks?|months?|years?)\s+ago\b', 'ago'),
-    (r'\b(\d+)\s+(days?|weeks?|months?|years?)\s+from\s+now\b', 'from_now'),
-    (r'\b(\d+)\s+(days?|weeks?|months?|years?)\s+earlier\b', 'earlier'),
-    (r'\b(\d+)\s+(days?|weeks?|months?|years?)\s+later\b', 'later'),
-    
-    # Common relative phrases
-    (r'\b(yesterday|today|tomorrow)\b', 'common'),
-    (r'\b(earlier\s+this\s+(week|month|year))\b', 'earlier_period'),
-    (r'\b(later\s+this\s+(week|month|year))\b', 'later_period'),
+
+    # --- Numeric + time unit with modifier (e.g. "3 days ago") ---
+    (r'\b(\d+|few|couple|several|some|a)\s+(days?|weeks?|months?|years?)\s+(ago|before|earlier|prior|from\s+now|later)\b', 'numeric_relative'),
+
+    # --- Standalone numeric + unit (e.g. "6 months", "3 years") ---
+    # Useful when used with context or inferred from clinical style
+    (r'\b(\d+|few|couple|several|some|a)\s+(days?|weeks?|months?|years?)\b', 'numeric_simple'),
+
+    # --- Hours-level ranges (e.g. "last 24 hours", "past 48 hrs") ---
+    (r'\b(last|past|previous|preceding)\s+\d+\s*(hours?|hrs?)\b', 'short_time_window'),
+
+    # --- 'past', 'over', 'within' style ranges ---
+    (r'\b(past|over|within)\s+(few\s+|couple\s+|several\s+|some\s+|last\s+|next\s+)?(days?|weeks?|months?|years?)\b', 'past_future_range'),
+
+    # --- 'start/end/early/late/middle of <period>' ---
+    (r'\b(start|end|early|late|beginning|middle)\s+(of\s+)?(the\s+)?(day|week|month|year|quarter|20\d{2})\b', 'range_period'),
+
+    # --- Clinical time references / history phrases ---
+    (r'\b(\d+|few|couple|several|some)\s+(year|month|week|day)s?\s*(history|prior)\b', 'history_period'),
+
+    # --- 'prior to <event>' phrases ---
+    (r'\b(prior\s+to\s+(admission|presentation|surgery|assessment|procedure|event|discharge|consultation))\b', 'prior_to_event'),
+
+    # --- 'preceding' or 'previous' period phrases ---
+    (r'\b(preceding|preceeding|previous)\s+(day|days|week|month|year)s?\b', 'preceding_period'),
 ]
 
+#Mormalisation helper function
+def normalise_relative(s: str) -> str:
+    """Clean and standardise relative date strings for consistent matching and mapping."""
+    s = s.lower().strip()
+    s = re.sub(r'\s+', ' ', s)                 # collapse multiple spaces
+    s = re.sub(r'[^a-z0-9\s]', '', s)          # remove punctuation
+
+    # Standardise quantifiers
+    s = re.sub(r'\b(few|couple|several|some|a|one)\b', 'some', s)
+
+    # Standardise temporal markers
+    s = re.sub(r'\b(last|previous|prior|preceding|preceeding)\b', 'past', s)
+    s = re.sub(r'\b(today|now|currently|presently)\b', 'today', s)
+    s = re.sub(r'\btomorrow\b', 'next day', s)
+    s = re.sub(r'\byesterday\b', 'past day', s)
+
+    # Normalise units (singular form for consistent mapping)
+    s = re.sub(r'\bhrs?\b', 'hour', s)
+    s = re.sub(r'\bmos?\b', 'month', s)
+    s = re.sub(r'\byrs?\b', 'year', s)
+    s = re.sub(r'\bdays?\b', 'day', s)
+    s = re.sub(r'\bweeks?\b', 'week', s)
+    s = re.sub(r'\bmonths?\b', 'month', s)
+    s = re.sub(r'\byears?\b', 'year', s)
+
+    # Simplify relative markers
+    s = re.sub(r'\b(ago|before|earlier|previously)\b', 'past', s)
+    s = re.sub(r'\b(from now|later|ahead)\b', 'future', s)
+
+    # Remove stopwords that don’t alter semantics
+    s = re.sub(r'\b(of|the|in|on)\b', '', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+
+    return s
+
+#Core extraction function
+def extract_relative_dates(text: str) -> List[Dict[str, Any]]:
+    """
+    Extract relative date mentions from text using regex-based patterns,
+    applying filters to reduce noise (e.g. ages, absolute dates).
+    """
+    if not text:
+        return []
+
+    relative_dates = []
+    seen = set()
+
+    # Replace common number words (useful for later absolute conversion)
+    NUM_WORDS = {
+        'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
+        'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10'
+    }
+    for word, num in NUM_WORDS.items():
+        text = re.sub(fr'\b{word}\b', num, text, flags=re.IGNORECASE)
+
+    for pattern, pattern_type in RELATIVE_DATE_PATTERNS:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            val = match.group(0).strip()
+
+            # --- Filters for clinical noise ---
+            if re.match(r'^\d{2,3}\s*years?$', val.lower()):
+                # Likely an age, not a relative date (e.g. "65 years")
+                continue
+            if re.search(r'[/\-\'’]', val):
+                # Skip if looks like a partial absolute date (e.g. 11/2013)
+                continue
+
+            # Skip duplicates
+            if val.lower() in seen:
+                continue
+            seen.add(val.lower())
+
+            relative_dates.append({
+                'id': f"rel_{len(relative_dates) + 1}",
+                'value': val,
+                'start': match.start(),
+                'end': match.end(),
+                'pattern_type': pattern_type
+            })
+
+    return relative_dates
+
+#Apply to dataframe
 def add_relative_dates(df):
     """
     Add relative_dates_json column to dataframe by extracting relative dates from text.
-    
-    Args:
-        df: Main dataframe with note_text column
-        
-    Returns:
-        DataFrame with added relative_dates_json column
     """
-    # Extract relative dates for each row
     relative_dates_list = []
     for _, row in df.iterrows():
-        # Extract relative dates without document timestamp
-        relative_dates = extract_relative_dates(row['note_text'])
+        relative_dates = extract_relative_dates(row.get('note_text', ''))
         relative_dates_list.append(relative_dates)
-    
-    # Add as JSON column
+
     df['relative_dates_json'] = [json.dumps(rd) for rd in relative_dates_list]
-    
     return df
 
-def extract_relative_dates(text: str) -> List[Dict[str, Any]]:
-    """
-    Extract relative dates from text without calculating absolute dates.
-    
-    Args:
-        text: Clinical note text
-        
-    Returns:
-        List of relative date dictionaries with original text and positions
-    """
-    if not text:
-        return []
-    
-    relative_dates = []
-    
-    for pattern, pattern_type in RELATIVE_DATE_PATTERNS:
-        matches = re.finditer(pattern, text, re.IGNORECASE)
-        for match in matches:
-            original_text = match.group(0)
-            start_pos = match.start()
-            end_pos = match.end()
-            
-            relative_dates.append({
-                'id': f"rel_{len(relative_dates) + 1}",
-                'value': original_text,
-                'start': start_pos,
-                'end': end_pos,
-                'pattern_type': pattern_type
-            })
-    
-    return relative_dates
-
+#Absolute date conversion
 def _calculate_absolute_date(text: str, pattern_type: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Calculate absolute date from relative date text."""
+    """Convert relative expressions into absolute dates using the document timestamp."""
     text_lower = text.lower()
-    
+
     try:
         if pattern_type == 'time_unit':
             return _handle_time_unit(text_lower, doc_date, groups)
         elif pattern_type == 'day_of_week':
             return _handle_day_of_week(text_lower, doc_date, groups)
-        elif pattern_type == 'ago':
-            return _handle_ago(text_lower, doc_date, groups)
-        elif pattern_type == 'from_now':
-            return _handle_from_now(text_lower, doc_date, groups)
-        elif pattern_type == 'earlier':
-            return _handle_earlier(text_lower, doc_date, groups)
-        elif pattern_type == 'later':
-            return _handle_later(text_lower, doc_date, groups)
+        elif pattern_type == 'numeric_relative':
+            return _handle_numeric_relative(text_lower, doc_date)
         elif pattern_type == 'common':
             return _handle_common(text_lower, doc_date)
-        elif pattern_type == 'earlier_period':
-            return _handle_earlier_period(text_lower, doc_date, groups)
-        elif pattern_type == 'later_period':
-            return _handle_later_period(text_lower, doc_date, groups)
+        elif pattern_type == 'past_future_range':
+            return _handle_range(text_lower, doc_date)
+        elif pattern_type == 'range_period':
+            return _handle_range_period(text_lower, doc_date)
     except Exception as e:
-        print(f"Error calculating date for '{text}': {e}")
+        print(f"[WARN] Error calculating date for '{text}': {e}")
         return None
-    
+
     return None
 
+#Individual handler functions
 def _handle_time_unit(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Handle patterns like 'last week', 'this month', 'next year'."""
-    modifier, time_unit = groups
-    
-    if modifier == 'last':
-        if time_unit == 'day':
-            return doc_date - timedelta(days=1)
-        elif time_unit == 'week':
-            return doc_date - timedelta(weeks=1)
-        elif time_unit == 'month':
-            # Approximate month as 30 days
-            return doc_date - timedelta(days=30)
-        elif time_unit == 'year':
-            return doc_date - timedelta(days=365)
-    elif modifier == 'this':
-        return doc_date
-    elif modifier == 'next':
-        if time_unit == 'day':
-            return doc_date + timedelta(days=1)
-        elif time_unit == 'week':
-            return doc_date + timedelta(weeks=1)
-        elif time_unit == 'month':
-            return doc_date + timedelta(days=30)
-        elif time_unit == 'year':
-            return doc_date + timedelta(days=365)
-    
-    return None
+    """Handle 'last week', 'this month', 'next year'."""
+    modifier, unit = groups
+    unit = unit.lower()
 
+    delta = {'day': 1, 'week': 7, 'month': 30, 'year': 365}.get(unit, 0)
+    if modifier == 'last':
+        return doc_date - timedelta(days=delta)
+    elif modifier == 'next':
+        return doc_date + timedelta(days=delta)
+    else:  # this
+        return doc_date
+        
 def _handle_day_of_week(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Handle patterns like 'last Monday', 'this Friday'."""
+    """Handle 'last Monday', 'next Friday'."""
     modifier, day_name = groups
     day_map = {
         'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
         'friday': 4, 'saturday': 5, 'sunday': 6
     }
-    
-    target_day = day_map.get(day_name.lower())
-    if target_day is None:
+
+    target = day_map.get(day_name.lower())
+    if target is None:
         return None
-    
-    current_weekday = doc_date.weekday()
-    days_ahead = target_day - current_weekday
-    
+
+    current = doc_date.weekday()
+    diff = target - current
+
     if modifier == 'last':
-        if days_ahead > 0:
-            days_ahead -= 7
-        return doc_date + timedelta(days=days_ahead)
-    elif modifier == 'this':
-        if days_ahead < 0:
-            days_ahead += 7
-        return doc_date + timedelta(days=days_ahead)
+        if diff >= 0: diff -= 7
     elif modifier == 'next':
-        if days_ahead <= 0:
-            days_ahead += 7
-        return doc_date + timedelta(days=days_ahead)
-    
+        if diff <= 0: diff += 7
+
+    return doc_date + timedelta(days=diff)
+
+def _handle_numeric_relative(text: str, doc_date: datetime) -> Optional[datetime]:
+    """Handle numeric expressions like '3 days ago' or '2 weeks later'."""
+    m = re.search(r'(\d+)\s+(day|week|month|year)s?\s+(ago|before|earlier|prior)', text)
+    if m:
+        num, unit, _ = m.groups()
+        delta = {'day': 1, 'week': 7, 'month': 30, 'year': 365}[unit]
+        return doc_date - timedelta(days=int(num) * delta)
+
+    m = re.search(r'(\d+)\s+(day|week|month|year)s?\s+(from now|later)', text)
+    if m:
+        num, unit, _ = m.groups()
+        delta = {'day': 1, 'week': 7, 'month': 30, 'year': 365}[unit]
+        return doc_date + timedelta(days=int(num) * delta)
+
     return None
-
-def _handle_ago(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Handle patterns like '3 days ago', '2 weeks ago'."""
-    number, time_unit = groups
-    num = int(number)
-    
-    if 'day' in time_unit:
-        return doc_date - timedelta(days=num)
-    elif 'week' in time_unit:
-        return doc_date - timedelta(weeks=num)
-    elif 'month' in time_unit:
-        return doc_date - timedelta(days=num * 30)
-    elif 'year' in time_unit:
-        return doc_date - timedelta(days=num * 365)
-    
-    return None
-
-def _handle_from_now(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Handle patterns like '3 days from now', '2 weeks from now'."""
-    number, time_unit = groups
-    num = int(number)
-    
-    if 'day' in time_unit:
-        return doc_date + timedelta(days=num)
-    elif 'week' in time_unit:
-        return doc_date + timedelta(weeks=num)
-    elif 'month' in time_unit:
-        return doc_date + timedelta(days=num * 30)
-    elif 'year' in time_unit:
-        return doc_date + timedelta(days=num * 365)
-    
-    return None
-
-def _handle_earlier(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Handle patterns like '3 days earlier'."""
-    return _handle_ago(text, doc_date, groups)
-
-def _handle_later(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Handle patterns like '3 days later'."""
-    return _handle_from_now(text, doc_date, groups)
 
 def _handle_common(text: str, doc_date: datetime) -> Optional[datetime]:
-    """Handle common patterns like 'yesterday', 'today', 'tomorrow'."""
+    """Handle 'yesterday', 'today', 'tomorrow'."""
     if 'yesterday' in text:
         return doc_date - timedelta(days=1)
     elif 'today' in text:
         return doc_date
     elif 'tomorrow' in text:
         return doc_date + timedelta(days=1)
-    
     return None
 
-def _handle_earlier_period(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Handle patterns like 'earlier this week'."""
-    period = groups[0] if groups else 'week'
-    
-    if 'week' in period:
-        # Start of current week (Monday)
-        days_since_monday = doc_date.weekday()
-        return doc_date - timedelta(days=days_since_monday)
-    elif 'month' in period:
-        # Start of current month
-        return doc_date.replace(day=1)
-    elif 'year' in period:
-        # Start of current year
-        return doc_date.replace(month=1, day=1)
-    
+def _handle_range(text: str, doc_date: datetime) -> Optional[datetime]:
+    """Handle 'past 2 weeks', 'within 3 months', etc."""
+    m = re.search(r'(past|within|over)\s+(\d+)\s+(day|week|month|year)', text)
+    if m:
+        _, num, unit = m.groups()
+        delta = {'day': 1, 'week': 7, 'month': 30, 'year': 365}[unit]
+        return doc_date - timedelta(days=int(num) * delta)
     return None
 
-def _handle_later_period(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
-    """Handle patterns like 'later this week'."""
-    period = groups[0] if groups else 'week'
-    
-    if 'week' in period:
-        # End of current week (Sunday)
-        days_until_sunday = 6 - doc_date.weekday()
-        return doc_date + timedelta(days=days_until_sunday)
-    elif 'month' in period:
-        # End of current month (approximate)
-        next_month = doc_date.replace(day=28) + timedelta(days=4)
-        return next_month.replace(day=1) - timedelta(days=1)
-    elif 'year' in period:
-        # End of current year
-        return doc_date.replace(month=12, day=31)
-    
+def _handle_range_period(text: str, doc_date: datetime) -> Optional[datetime]:
+    """Handle 'start of 2019', 'end of this month', etc."""
+    if 'start' in text or 'beginning' in text:
+        if 'year' in text:
+            return doc_date.replace(month=1, day=1)
+        elif 'month' in text:
+            return doc_date.replace(day=1)
+        elif 'week' in text:
+            return doc_date - timedelta(days=doc_date.weekday())
+    elif 'end' in text:
+        if 'year' in text:
+            return doc_date.replace(month=12, day=31)
+        elif 'month' in text:
+            next_month = doc_date.replace(day=28) + timedelta(days=4)
+            return next_month.replace(day=1) - timedelta(days=1)
+        elif 'week' in text:
+            return doc_date + timedelta(days=(6 - doc_date.weekday()))
     return None
