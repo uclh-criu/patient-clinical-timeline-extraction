@@ -77,9 +77,14 @@ RELATIVE_DATE_PATTERNS = [
     (r'\b(preceding|preceeding|previous)\s+(day|days|week|month|year)s?\b', 'preceding_period'),
 ]
 
-#Mormalisation helper function
+#Mormalisation helper function (only used in evaluation)
 def normalise_relative(s: str) -> str:
-    """Clean and standardise relative date strings for consistent matching and mapping."""
+    """
+    Utility for evaluation/comparison only.
+    Used to normalise relative date expressions so that
+    semantically equivalent phrases (e.g. "last few months" vs "past 3 months")
+    can be matched during testing.
+    """
     s = s.lower().strip()
     s = re.sub(r'\s+', ' ', s)                 # collapse multiple spaces
     s = re.sub(r'[^a-z0-9\s]', '', s)          # remove punctuation
