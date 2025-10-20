@@ -163,16 +163,3 @@ def extract_relative_dates(text: str) -> List[Dict[str, Any]]:
             })
 
     return relative_dates
-
-#Apply to dataframe
-def add_relative_dates(df):
-    """
-    Add relative_dates_json column to dataframe by extracting relative dates from text.
-    """
-    relative_dates_list = []
-    for _, row in df.iterrows():
-        relative_dates = extract_relative_dates(row.get('note_text', ''))
-        relative_dates_list.append(relative_dates)
-
-    df['relative_dates_json'] = [json.dumps(rd) for rd in relative_dates_list]
-    return df
