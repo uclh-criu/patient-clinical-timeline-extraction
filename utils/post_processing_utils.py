@@ -2,7 +2,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from dateutil.parser import parse
 import re
-from datetime import datetime
+from typing import Optional
+from datetime import datetime, timedelta
 from date_extractor_utils import RELATIVE_DATE_PATTERNS
 
 #Individual handler functions
