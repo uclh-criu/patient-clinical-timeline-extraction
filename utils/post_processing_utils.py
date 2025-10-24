@@ -258,7 +258,7 @@ def get_patient_timeline_summary(timeline_df, patient_id):
     
     # Create the timeline summary
     timeline_summary = {
-        'patient_id': patient_id,
+        'patient_id': int(patient_id),
         'total_entities': len(patient_df),
         'date_range': {
             'start': patient_df['standardized_date'].min().strftime('%Y-%m-%d'),
