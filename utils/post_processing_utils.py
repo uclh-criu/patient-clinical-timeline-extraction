@@ -257,8 +257,16 @@ def get_patient_timeline_summary(timeline_df, patient_id):
     patient_df = patient_df.dropna(subset=['standardized_date']).sort_values(by='standardized_date')
     
     # Create the timeline summary
+    # Handle both numeric and string patient IDs for JSON serialization
+    try:
+        # Try to convert to int if it's numeric
+        patient_id_serializable = int(patient_id)
+    except (ValueError, TypeError):
+        # If conversion fails, keep as string
+        patient_id_serializable = str(patient_id)
+    
     timeline_summary = {
-        'patient_id': int(patient_id),
+        'patient_id': patient_id_serializable,
         'total_entities': len(patient_df),
         'date_range': {
             'start': patient_df['standardized_date'].min().strftime('%Y-%m-%d'),
