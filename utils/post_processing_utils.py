@@ -278,10 +278,12 @@ def get_patient_timeline_summary(timeline_df, patient_id):
     # Add each event in chronological order
     for _, row in patient_df.iterrows():
         event = {
-            'date': row['standardized_date'].strftime('%Y-%m-%d'),
-            'event': row['entity_preferred_name'],
+            'original_date': row['date'],
+            'standardized_date': row['standardized_date'].strftime('%Y-%m-%d'),
             'date_type': row['date_type'],
-            'original_date': row['date']
+            'entity_cui': row['entity_cui'],
+            'entity_label': row['entity_label'],
+            'entity_preferred_name': row['entity_preferred_name']
         }
         timeline_summary['events'].append(event)
     
