@@ -116,3 +116,24 @@ def calculate_metrics(all_predictions, df):
         'fp': fp,
         'fn': fn
     }
+
+# Function to create a boolean filter for a column, adapting to its data type
+def create_non_empty_filter(series):
+    # Drop NA values to prevent errors and get the first valid type
+    series_no_na = series.dropna()
+    if series_no_na.empty:
+        # If the series is all NaNs, return a series of all False
+        return pd.Series([False] * len(series), index=series.index)
+    
+    first_item_type = type(series_no_na.iloc[0])
+    
+    if first_item_type == list:
+        print(f"'{series.name}' is a list column. Using len().")
+        return series.apply(len) > 0
+    elif first_item_type == str:
+        print(f"'{series.name}' is a string column. Using str.len().")
+        # An empty list as a string ('[]') has length 2.
+        return series.str.len() > 2
+    else:
+        print(f"Warning: '{series.name}' has an unexpected type ({first_item_type}). Returning all False.")
+        return pd.Series([False] * len(series), index=series.index)
