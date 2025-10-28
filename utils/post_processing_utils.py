@@ -1,22 +1,77 @@
 import pandas as pd
 import plotly.graph_objects as go
 from dateutil.parser import parse
+from dateutil.relativedelta import relativedelta
 import re
-from typing import Optional
-from datetime import datetime, timedelta
+from typing import Optional, Tuple
+from datetime import datetime
+from word2number import w2n
+
 from date_extractor_utils import RELATIVE_DATE_PATTERNS
+
+# Helper function to parse numbers
+def _parse_number(text: str) -> Optional[float]:
+    """
+    Parses a number from a string, handling ranges, digits, decimals, and number-words.
+    """
+    text = text.lower()
+    
+    # Handle numeric ranges like "2-3", returning the larger number.
+    range_match = re.search(r'(\d+)\s*-\s*(\d+)', text)
+    if range_match:
+        return float(range_match.group(2))
+
+    # Handle qualitative terms like "a few", "a couple" BEFORE word-to-number
+    if 'few' in text or 'couple' in text:
+        return 2.0 # Approximation
+
+    # Convert number words to numeric form
+    try:
+        # Handle 'a' or 'an' as 1, but be specific
+        text = re.sub(r'\b(a|an)\b(?=\s+(day|week|month|year))', '1', text)
+        processed_words = []
+        words = text.split()
+        # Process word by word to avoid w2n failing on non-number words
+        for word in words:
+            try:
+                # Check if it's a number word that w2n knows
+                if word in w2n.american_number_system:
+                    processed_words.append(str(w2n.word_to_num(word)))
+                else:
+                    processed_words.append(word)
+            except ValueError:
+                processed_words.append(word)
+        text = ' '.join(processed_words)
+    except Exception:
+        pass # Ignore if conversion fails
+
+    # Find the first remaining digit or decimal number
+    match = re.search(r'(\d+(?:\.\d+)?)', text)
+    if match:
+        return float(match.group(1))
+        
+    return None
 
 #Individual handler functions
 def _handle_time_unit(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
     """Handle 'last week', 'this month', 'next year'."""
     modifier, unit = groups
-    unit = unit.lower()
+    unit = unit.lower().rstrip('s') # Remove plural 's'
 
-    delta = {'day': 1, 'week': 7, 'month': 30, 'year': 365}.get(unit, 0)
+    delta_map = {
+        'day': relativedelta(days=1),
+        'week': relativedelta(weeks=1),
+        'month': relativedelta(months=1),
+        'year': relativedelta(years=1)
+    }
+    delta = delta_map.get(unit)
+    if not delta:
+        return None
+
     if modifier == 'last':
-        return doc_date - timedelta(days=delta)
+        return doc_date - delta
     elif modifier == 'next':
-        return doc_date + timedelta(days=delta)
+        return doc_date + delta
     else:  # this
         return doc_date
         
@@ -40,32 +95,58 @@ def _handle_day_of_week(text: str, doc_date: datetime, groups: tuple) -> Optiona
     elif modifier == 'next':
         if diff <= 0: diff += 7
 
-    return doc_date + timedelta(days=diff)
+    return doc_date + relativedelta(days=diff)
 
 def _handle_numeric_relative(text: str, doc_date: datetime) -> Optional[datetime]:
-    """Handle numeric expressions like '3 days ago' or '2 weeks later'."""
-    m = re.search(r'(\d+)\s+(day|week|month|year)s?\s+(ago|before|earlier|prior)', text)
-    if m:
-        num, unit, _ = m.groups()
-        delta = {'day': 1, 'week': 7, 'month': 30, 'year': 365}[unit]
-        return doc_date - timedelta(days=int(num) * delta)
+    """
+    Handle numeric expressions like '3 days ago', 'two weeks later', '1.5 years prior'.
+    Uses the _parse_number helper and relativedelta for accuracy.
+    """
+    num = _parse_number(text)
+    if num is None:
+        return None
 
-    m = re.search(r'(\d+)\s+(day|week|month|year)s?\s+(from now|later)', text)
-    if m:
-        num, unit, _ = m.groups()
-        delta = {'day': 1, 'week': 7, 'month': 30, 'year': 365}[unit]
-        return doc_date + timedelta(days=int(num) * delta)
+    # Determine the time unit
+    unit_match = re.search(r'(day|week|month|year|yr|hour)s?', text, re.IGNORECASE)
+    if not unit_match:
+        return None
+    unit = unit_match.group(1).lower().rstrip('s')
 
-    return None
+    # Create the relativedelta object
+    if unit in ['year', 'yr']:
+        # Handle decimal years by converting to months
+        if isinstance(num, float) and not num.is_integer():
+            total_months = int(num * 12)
+            delta = relativedelta(months=total_months)
+        else:
+            delta = relativedelta(years=int(num))
+    elif unit == 'month':
+        delta = relativedelta(months=int(num))
+    elif unit == 'week':
+        delta = relativedelta(weeks=int(num))
+    elif unit in ['day', 'hour']:
+        delta = relativedelta(days=int(num)) # Treat hours as days for simplicity on timeline
+    else:
+        return None
+
+    # Check for past or future keywords to determine direction
+    if any(kw in text for kw in ['ago', 'before', 'earlier', 'prior', 'past']):
+        return doc_date - delta
+    elif any(kw in text for kw in ['from now', 'later', 'after', 'post']):
+        return doc_date + delta
+    
+    # Default to past if no clear modifier (e.g., from 'numeric_prefixed_range' like 'last 2 weeks')
+    return doc_date - delta
+
 
 def _handle_common(text: str, doc_date: datetime) -> Optional[datetime]:
     """Handle 'yesterday', 'today', 'tomorrow'."""
     if 'yesterday' in text:
-        return doc_date - timedelta(days=1)
+        return doc_date - relativedelta(days=1)
     elif 'today' in text:
         return doc_date
     elif 'tomorrow' in text:
-        return doc_date + timedelta(days=1)
+        return doc_date + relativedelta(days=1)
     return None
 
 def _handle_range(text: str, doc_date: datetime) -> Optional[datetime]:
@@ -74,7 +155,7 @@ def _handle_range(text: str, doc_date: datetime) -> Optional[datetime]:
     if m:
         _, num, unit = m.groups()
         delta = {'day': 1, 'week': 7, 'month': 30, 'year': 365}[unit]
-        return doc_date - timedelta(days=int(num) * delta)
+        return doc_date - relativedelta(days=int(num) * delta)
     return None
 
 def _handle_range_period(text: str, doc_date: datetime) -> Optional[datetime]:
@@ -85,15 +166,71 @@ def _handle_range_period(text: str, doc_date: datetime) -> Optional[datetime]:
         elif 'month' in text:
             return doc_date.replace(day=1)
         elif 'week' in text:
-            return doc_date - timedelta(days=doc_date.weekday())
+            return doc_date - relativedelta(days=doc_date.weekday())
     elif 'end' in text:
         if 'year' in text:
             return doc_date.replace(month=12, day=31)
         elif 'month' in text:
-            next_month = doc_date.replace(day=28) + timedelta(days=4)
-            return next_month.replace(day=1) - timedelta(days=1)
+            next_month = doc_date.replace(day=28) + relativedelta(days=4)
+            return next_month.replace(day=1) - relativedelta(days=1)
         elif 'week' in text:
-            return doc_date + timedelta(days=(6 - doc_date.weekday()))
+            return doc_date + relativedelta(days=(6 - doc_date.weekday()))
+    return None
+
+def _handle_since_year(text: str, doc_date: datetime) -> Optional[datetime]:
+    """Handle 'since 2019', 'since summer 2020', etc."""
+    match = re.search(r'(19|20)\d{2}', text)
+    if match:
+        year = int(match.group(0))
+        return datetime(year, 1, 1)
+    return None
+
+def _handle_since_month(text: str, doc_date: datetime) -> Optional[datetime]:
+    """Handle 'since January 2023' or 'since November'."""
+    try:
+        parsed_date = parse(text.replace('since', '').strip())
+        if str(doc_date.year) not in text and str(doc_date.year-1) not in text:
+            if parsed_date.month > doc_date.month:
+                return parsed_date.replace(year=doc_date.year - 1, day=1)
+            else:
+                return parsed_date.replace(year=doc_date.year, day=1)
+        return parsed_date.replace(day=1)
+    except (ValueError, TypeError):
+        return None
+
+def _handle_prior_to_event(text: str, doc_date: datetime) -> Optional[datetime]:
+    """Handle 'prior to admission'. Returns the document date as a proxy."""
+    return doc_date
+
+def _handle_part_of_day(text: str, doc_date: datetime, groups: tuple) -> Optional[datetime]:
+    """Handle 'last evening', 'this morning', etc."""
+    modifier, _ = groups
+    if modifier == 'last':
+        return doc_date - relativedelta(days=1)
+    elif modifier == 'next':
+        return doc_date + relativedelta(days=1)
+    else: # 'this'
+        return doc_date
+
+def _handle_month_last_year(text: str, doc_date: datetime) -> Optional[datetime]:
+    """Handle 'September last year'."""
+    try:
+        # Manually construct the date for accuracy
+        parsed_month = parse(text, fuzzy=True)
+        return datetime(doc_date.year, parsed_month.month, 1) - relativedelta(years=1)
+    except (ValueError, TypeError):
+        return None
+
+def _handle_preceding_period(text: str, doc_date: datetime) -> Optional[datetime]:
+    """Handle 'preceding days', 'previous week'."""
+    if 'day' in text:
+        return doc_date - relativedelta(days=1)
+    elif 'week' in text:
+        return doc_date - relativedelta(weeks=1)
+    elif 'month' in text:
+        return doc_date - relativedelta(months=1)
+    elif 'year' in text:
+        return doc_date - relativedelta(years=1)
     return None
 
 #Absolute date conversion
@@ -106,14 +243,26 @@ def _calculate_absolute_date(text: str, pattern_type: str, doc_date: datetime, g
             return _handle_time_unit(text_lower, doc_date, groups)
         elif pattern_type == 'day_of_week':
             return _handle_day_of_week(text_lower, doc_date, groups)
-        elif pattern_type == 'numeric_relative':
+        elif pattern_type in ['numeric_relative', 'numeric_prefixed_range', 'history_period', 'numeric_range_modified']:
             return _handle_numeric_relative(text_lower, doc_date)
-        elif pattern_type == 'common':
+        elif pattern_type == 'common_no_today':
             return _handle_common(text_lower, doc_date)
         elif pattern_type == 'past_future_range':
             return _handle_range(text_lower, doc_date)
         elif pattern_type == 'range_period':
             return _handle_range_period(text_lower, doc_date)
+        elif pattern_type == 'since_year':
+            return _handle_since_year(text_lower, doc_date)
+        elif pattern_type == 'since_month':
+            return _handle_since_month(text_lower, doc_date)
+        elif pattern_type == 'prior_to_event':
+            return _handle_prior_to_event(text_lower, doc_date)
+        elif pattern_type == 'part_of_day':
+            return _handle_part_of_day(text_lower, doc_date, groups)
+        elif pattern_type == 'month_last_year':
+            return _handle_month_last_year(text_lower, doc_date)
+        elif pattern_type == 'preceding_period':
+            return _handle_preceding_period(text_lower, doc_date)
     except Exception as e:
         print(f"[WARN] Error calculating date for '{text}': {e}")
         return None
@@ -177,8 +326,7 @@ def create_interactive_patient_timeline(timeline_df, patient_id):
     date_range_start = patient_df['standardized_date'].min().strftime('%Y-%m-%d')
     date_range_end = patient_df['standardized_date'].max().strftime('%Y-%m-%d')
     
-    # Calculate height based on number of unique entities (for spacing)
-    height = max(600, len(unique_entities) * 30)  # minimum 600px, 30px per unique entity
+    height = max(600, len(unique_entities) * 30)
         
     fig = go.Figure(data=[
         go.Scatter(
@@ -207,9 +355,9 @@ def create_interactive_patient_timeline(timeline_df, patient_id):
             tickvals=sorted(unique_entities)
         ),
         margin=dict(
-            l=200,  # Left margin for labels
+            l=200,
             r=20,
-            t=80,  # Increased top margin to move title outside
+            t=80,
             b=50
         )
     )
