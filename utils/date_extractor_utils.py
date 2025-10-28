@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import json
+import dateparser
 from dateparser.search import search_dates
 
 def clean_value(v: str) -> str:
@@ -15,29 +16,52 @@ def clean_value(v: str) -> str:
     return v.strip()
 
 def extract_absolute_dates(text: str):
-    """
-    Extract cleaner absolute dates using dateparser.
-    Returns date strings and positions.
-    """
     if not text:
         return []
 
+    date_pattern = r"""
+    \b(
+        (?:(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*)|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?)),?\s+\d{4}
+        |
+        \d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}
+        |
+        \d{4}[/.-]\d{1,2}[/.-]\d{1,2}
+        |
+        (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}
+        |
+        (?:\d{1,2}[/.-]\d{4}|\d{4}[/.-]\d{1,2})
+        |
+        \d{1.2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+'\d{2}
+        |
+        (?:19|20)\d{2}
+    )\b
+    """
+    
     absolute_dates = []
-    # Regex to find plausible date substrings first (filters out noise)
-    date_pattern = r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\b'
-    matches = list(re.finditer(date_pattern, text, re.IGNORECASE))
 
+    try:
+        matches = re.finditer(date_pattern, text, re.IGNORECASE | re.VERBOSE)
+    except re.error as e:
+        print(f"Regex error: {e}")
+        return []
+        
+    found_spans = set()
+    
     for m in matches:
         substring = m.group(0)
-        parsed = search_dates(substring)
-        # Keep only if it's truly parseable as a date
-        if parsed:
+        span = (m.start(), m.end())
+        
+        # Validate using the default, non-strict dateparser.parse()
+        parsed = dateparser.parse(substring)
+        
+        if parsed and span not in found_spans:
             absolute_dates.append({
                 'id': f"abs_{len(absolute_dates) + 1}",
                 'value': substring.strip(),
                 'start': m.start(),
                 'end': m.end()
             })
+            found_spans.add(span)
 
     return absolute_dates
 
