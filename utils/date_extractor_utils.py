@@ -82,32 +82,32 @@ def extract_absolute_dates(text: str):
 
 #Relative date regex patterns
 RELATIVE_DATE_PATTERNS = [
-    # --- Simple Phrases ---
+    # Month-based Phrases (e.g., "since January 2023", "September last year")
+    (r'\b(since\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+20\d{2})?)\b', 'since_month'),
+    (r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(last\s+year)\b', 'month_last_year'),
+
+    # Year-based Phrases (e.g., "since 2016", "since summer 2020")
+    (r'\b(since\s+(?:summer\s+|winter\s+|spring\s+|autumn\s+)?(?:19|20)\d{2})\b', 'since_year'),
+
+    # Numeric Range Phrases (e.g., "last 2-3 years", "6-8 weeks ago")
+    (r'\b(last|past)\s+(\d+\s*-\s*\d+)\s+(days?|weeks?|months?|years?)\b', 'numeric_prefixed_range'),
+    (r'\b(\d+\s*-\s*\d+)\s+(days?|weeks?|months?|years?)\s+(ago|prior|before|earlier)\b', 'numeric_range_modified'),
+    
+    # Numeric Relative Phrases (e.g., "3 days ago", "last 2 weeks")
+    (fr'\b({_NUMERIC_PATTERN})\s+(day|week|month|year|yr|hour)s?\s+(ago|before|earlier|prior|post|after)\b', 'numeric_relative'),
+    (fr'\b(last|past|previous|preceding)\s+({_NUMERIC_PATTERN})\s+(day|week|month|year|yr|hour)s?\b', 'numeric_prefixed_range'),
+    (r'\b(past|over|within)\s+(few\s+|couple\s+|several\s+|some\s+|last\s+|next\s+)?(days?|weeks?|years?)\b', 'past_future_range'),
+
+    # Simple Phrases
     (r'\b(yesterday|tomorrow)\b', 'common_no_today'),
     (r'\b(this|last|next)\s+(morning|evening|night)\b', 'part_of_day'),
     (r'\b(last|this|next)\s+(week|month|year|day)\b', 'time_unit'),
     (r'\b(last|this|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', 'day_of_week'),
 
-    # --- Numeric Relative Phrases (e.g., "3 days ago", "last 2 weeks") ---
-    (fr'\b({_NUMERIC_PATTERN})\s+(day|week|month|year|yr|hour)s?\s+(ago|before|earlier|prior|post|after)\b', 'numeric_relative'),
-    (fr'\b(last|past|previous|preceding)\s+({_NUMERIC_PATTERN})\s+(day|week|month|year|yr|hour)s?\b', 'numeric_prefixed_range'),
-    (r'\b(past|over|within)\s+(few\s+|couple\s+|several\s+|some\s+|last\s+|next\s+)?(days?|weeks?|years?)\b', 'past_future_range'),
-
-    # --- Date Period Phrases (e.g., "start of the week", "end of 2023") ---
+    # Date Period Phrases (e.g., "start of the week", "end of 2023")
     (r'\b(start|end|beginning|middle)\s+(of\s+)?(the\s+|this\s+|last\s+)?(day|week|month|year|quarter|20\d{2})\b', 'range_period'),
-
-    # --- Month-based Phrases (e.g., "since January 2023", "September last year") ---
-    (r'\b(since\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+20\d{2})?)\b', 'since_month'),
-    (r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(last\s+year)\b', 'month_last_year'),
-
-    # --- Year-based Phrases (e.g., "since 2016", "since summer 2020") ---
-    (r'\b(since\s+(?:summer\s+|winter\s+|spring\s+|autumn\s+)?(?:19|20)\d{2})\b', 'since_year'),
     
-    # --- Numeric Range Phrases (e.g., "last 2-3 years", "6-8 weeks ago") ---
-    (r'\b(last|past)\s+(\d+\s*-\s*\d+)\s+(days?|weeks?|months?|years?)\b', 'numeric_prefixed_range'),
-    (r'\b(\d+\s*-\s*\d+)\s+(days?|weeks?|months?|years?)\s+(ago|prior|before|earlier)\b', 'numeric_range_modified'),
-    
-    # --- Clinical Phrases (e.g., "10 year history", "prior to admission") ---
+    # Clinical Phrases (e.g., "10 year history", "prior to admission")
     (fr'\b({_NUM_WORDS_PATTERN}|\d+)\s+(year|month|week|day)s?\s*(history|prior)\b', 'history_period'),
     (r'\b(prior\s+to\s+(admission|presentation|surgery|assessment|procedure|event|discharge|consultation))\b', 'prior_to_event'),
     (r'\b(preceding|previous)\s+(day|days|week|month|year)s?\b', 'preceding_period'),
