@@ -16,3 +16,4 @@ pydantic
 bitsandbytes
 plotly
 nbformat
+word2number
