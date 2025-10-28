@@ -6,6 +6,10 @@ import json
 import dateparser
 from dateparser.search import search_dates
 
+# Centralized number pattern for regex
+_NUM_WORDS_PATTERN = r'few|couple|several|some|a|one|two|three|four|five|six|seven|eight|nine|ten'
+_NUMERIC_PATTERN = fr'[>~]?\d+(?:\.\d+)?|{_NUM_WORDS_PATTERN}'
+
 def clean_value(v: str) -> str:
     """General cleaning wrapper for both absolute and relative comparisons."""
     if not isinstance(v, str):
@@ -15,7 +19,18 @@ def clean_value(v: str) -> str:
     v = re.sub(r'[^a-z0-9\s]', '', v)
     return v.strip()
 
+#Extraction function for absolute dates
 def extract_absolute_dates(text: str):
+    """
+    Extracts and validates absolute date mentions from text using regex.
+    
+    Args:
+        text: The input string from which to extract dates.
+
+    Returns:
+        A list of dictionaries, each representing a found date with its 
+        value, start, and end indices.
+    """
     if not text:
         return []
 
@@ -67,51 +82,38 @@ def extract_absolute_dates(text: str):
 
 #Relative date regex patterns
 RELATIVE_DATE_PATTERNS = [
-
-    # 'yesterday' and 'tomorrow'
+    # --- Simple Phrases ---
     (r'\b(yesterday|tomorrow)\b', 'common_no_today'),
     (r'\b(this|last|next)\s+(morning|evening|night)\b', 'part_of_day'),
-
-    # --- Standard relative time phrases ---
     (r'\b(last|this|next)\s+(week|month|year|day)\b', 'time_unit'),
     (r'\b(last|this|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', 'day_of_week'),
 
-    # --- Numeric + time unit with modifier (e.g. "3 days ago") ---
-    # UPDATED: Correctly handle singular units like "1 year ago"
-    (r'\b([>~]?\d+(?:\.\d+)?|few|couple|several|some|a)\s+(day|week|month|year|yr|hour)s?\s+(ago|before|earlier|prior|post|after)\b', 'numeric_relative'),
-    
-    # --- This captures "last 2 weeks", "past 3 months", "last 24 hours" etc. ---
-    # UPDATED: Generalised to better handle plural units like "last 9 months"
-    (r'\b(last|past|previous|preceding)\s+([>~]?\d+(?:\.\d+)?|few|couple|several|some|a)\s+(day|week|month|year|yr|hour)s?\b', 'numeric_prefixed_range'),
-    
-    # --- 'past', 'over', 'within' style ranges (without numbers) ---
+    # --- Numeric Relative Phrases (e.g., "3 days ago", "last 2 weeks") ---
+    (fr'\b({_NUMERIC_PATTERN})\s+(day|week|month|year|yr|hour)s?\s+(ago|before|earlier|prior|post|after)\b', 'numeric_relative'),
+    (fr'\b(last|past|previous|preceding)\s+({_NUMERIC_PATTERN})\s+(day|week|month|year|yr|hour)s?\b', 'numeric_prefixed_range'),
     (r'\b(past|over|within)\s+(few\s+|couple\s+|several\s+|some\s+|last\s+|next\s+)?(days?|weeks?|years?)\b', 'past_future_range'),
 
-    # --- UPDATED: Generalised to handle more 'start/end of' phrases ---
+    # --- Date Period Phrases (e.g., "start of the week", "end of 2023") ---
     (r'\b(start|end|beginning|middle)\s+(of\s+)?(the\s+|this\s+|last\s+)?(day|week|month|year|quarter|20\d{2})\b', 'range_period'),
 
-    # --- UPDATED: Made month patterns much stricter to reduce FPs ---
+    # --- Month-based Phrases (e.g., "since January 2023", "September last year") ---
     (r'\b(since\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+20\d{2})?)\b', 'since_month'),
     (r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(last\s+year)\b', 'month_last_year'),
 
-    # --- "since <year>" or "since <season> <year>" phrases ---
+    # --- Year-based Phrases (e.g., "since 2016", "since summer 2020") ---
     (r'\b(since\s+(?:summer\s+|winter\s+|spring\s+|autumn\s+)?(?:19|20)\d{2})\b', 'since_year'),
     
-    # --- UPDATED & CORRECTED: Handle numeric ranges like "2-3 years" or "6-8 weeks" ---
+    # --- Numeric Range Phrases (e.g., "last 2-3 years", "6-8 weeks ago") ---
     (r'\b(last|past)\s+(\d+\s*-\s*\d+)\s+(days?|weeks?|months?|years?)\b', 'numeric_prefixed_range'),
     (r'\b(\d+\s*-\s*\d+)\s+(days?|weeks?|months?|years?)\s+(ago|prior|before|earlier)\b', 'numeric_range_modified'),
     
-    # --- Clinical time references / history phrases ---
-    (r'\b(\d+|few|couple|several|some)\s+(year|month|week|day)s?\s*(history|prior)\b', 'history_period'),
-
-    # --- 'prior to <event>' phrases ---
+    # --- Clinical Phrases (e.g., "10 year history", "prior to admission") ---
+    (fr'\b({_NUM_WORDS_PATTERN}|\d+)\s+(year|month|week|day)s?\s*(history|prior)\b', 'history_period'),
     (r'\b(prior\s+to\s+(admission|presentation|surgery|assessment|procedure|event|discharge|consultation))\b', 'prior_to_event'),
-
-    # --- 'preceding' or 'previous' period phrases ---
     (r'\b(preceding|previous)\s+(day|days|week|month|year)s?\b', 'preceding_period'),
 ]
 
-#Core extraction function
+#Core extraction function for relative dates
 def extract_relative_dates(text: str) -> List[Dict[str, Any]]:
     """
     Extract relative date mentions from text using regex-based patterns,
@@ -123,34 +125,24 @@ def extract_relative_dates(text: str) -> List[Dict[str, Any]]:
     relative_dates = []
     seen = set()
 
-    # --- UPDATED: More precise keywords for future dates ---
+    # Keywords for future dates
     FUTURE_KEYWORDS = ['next', 'tomorrow', 'later', 'from now', 'ahead', 'coming', 'within']
-
-    # Replace common number words (useful for later absolute conversion)
-    NUM_WORDS = {
-        'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
-        'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10'
-    }
-    for word, num in NUM_WORDS.items():
-        text = re.sub(fr'\b{word}\b', num, text, flags=re.IGNORECASE)
 
     for pattern, pattern_type in RELATIVE_DATE_PATTERNS:
         for match in re.finditer(pattern, text, re.IGNORECASE):
             val = match.group(0).strip()
             val_lower = val.lower()
 
-            # --- NEW: Filter out future dates ---
+            # Filter out future dates
             if any(keyword in val_lower for keyword in FUTURE_KEYWORDS):
                 continue
 
-            # --- Filters for clinical noise ---
+            # Filters for clinical noise
             if re.match(r'^\d{2,3}\s*years?$', val.lower()):
-                # Likely an age, not a relative date (e.g. "65 years")
                 continue
             
-            # --- UPDATED: Correctly allow hyphens for all numeric range patterns ---
+            # Correctly allow hyphens for all numeric range patterns
             if ('numeric_prefixed_range' not in pattern_type and 'numeric_range_modified' not in pattern_type) and re.search(r'[/\-\'’]', val):
-                # Skip if it contains special chars AND is NOT a numeric range pattern
                 continue
 
             # Skip duplicates
@@ -168,7 +160,7 @@ def extract_relative_dates(text: str) -> List[Dict[str, Any]]:
 
     return relative_dates
 
-#Normalisation helper function (only used in evaluation)
+#Normalisation helper function for relative dates (only used in evaluation)
 def normalise_relative(s: str) -> str:
     """
     Utility for evaluation/comparison only.
@@ -183,7 +175,7 @@ def normalise_relative(s: str) -> str:
     s = re.sub(r'\s+', ' ', s)                 # collapse multiple spaces
     s = re.sub(r'[^a-z0-9\s\-]', '', s)         # remove punctuation, but keep hyphens for ranges like 2-3
 
-    # --- NEW: Convert number words to digits for consistency ---
+    # Xonvert number words to digits for consistency
     NUM_WORDS = {
         'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
         'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10'
@@ -191,7 +183,7 @@ def normalise_relative(s: str) -> str:
     for word, num in NUM_WORDS.items():
         s = re.sub(fr'\b{word}\b', num, s)
 
-    # Standardise quantifiers (NOTE: 'one' is removed as it's now '1')
+    # Standardise quantifiers
     s = re.sub(r'\b(few|couple|several|some|a)\b', 'some', s)
 
     # Standardise temporal markers
