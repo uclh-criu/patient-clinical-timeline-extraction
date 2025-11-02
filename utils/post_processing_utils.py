@@ -1,6 +1,6 @@
 import pandas as pd
 import plotly.graph_objects as go
-from dateutil.parser import parse
+from dateutil.parser import parse, ParserError
 from dateutil.relativedelta import relativedelta
 import re
 from typing import Optional, Tuple
@@ -282,7 +282,12 @@ def standardize_date(row):
 
     # Handle relative dates using existing logic
     if date_type == 'relative' and doc_timestamp:
-        doc_date = pd.to_datetime(doc_timestamp)
+        try:
+            doc_date = pd.to_datetime(doc_timestamp)
+        except (ValueError, TypeError, ParserError):
+            # If the document timestamp is invalid, we can't resolve the relative date.
+            return pd.NaT
+            
         for pattern, pattern_type in RELATIVE_DATE_PATTERNS:
             match = re.search(pattern, date_str, re.IGNORECASE)
             if match:
@@ -293,7 +298,7 @@ def standardize_date(row):
     # Handle absolute dates
     try:
         return parse(date_str, fuzzy=False)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, ParserError):
         return pd.NaT
 
 def create_interactive_patient_timeline(timeline_df, patient_id):
