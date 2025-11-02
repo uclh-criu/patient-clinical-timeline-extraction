@@ -11,3 +11,5 @@ outputs/
 *.tsv
 *.xlsx
 *.docx
+*.png
+*.pptx
