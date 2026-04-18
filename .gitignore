@@ -6,8 +6,6 @@ models/
 outputs/
 
 # Ignore all data files
-*.csv
-*.json
 *.tsv
 *.xlsx
 *.docx
